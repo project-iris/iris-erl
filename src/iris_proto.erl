@@ -28,15 +28,7 @@
 -define(OP_TUNCLOSE, 16#0d).
 
 %% Implemented relay protocol version.
-version() -> "v1.0a".
-
-%% Encodes a number into base 128 varint format.
-encodeVarint(Num) when Num < 128 -> <<0:1, Num:7>>;
-encodeVarint(Num) ->
-	Rem = Num rem 128,
-	Res = Num div 128,
-	Enc = encodeVarint(Res),
-	<<1:1, Rem:7, Enc/binary>>.
+version() -> "v1.0".
 
 %% Serializes a single byte into the relay.
 sendByte(Socket, Byte) ->
@@ -50,8 +42,14 @@ sendBool(Socket, Bool) ->
 	end.
 
 %% Serializes a variable int into the relay.
+sendVarint(Socket, Num) when Num < 128 -> sendByte(Socket, Num);
 sendVarint(Socket, Num) ->
-	gen_tcp:send(Socket, encodeVarint(Num)).
+	Rem = Num rem 128,
+	Res = Num div 128,
+	case sendByte(Socket, 128 + Rem) of
+		ok    -> sendVarint(Socket, Res);
+		Error -> Error
+	end.
 
 %% Serializes a length-tagged binary array into the relay.
 sendBinary(Socket, Binary) ->
@@ -75,6 +73,17 @@ sendInit(Socket, App) ->
 		Error -> Error
 	end.
 
+%% Assembles and serializes a broadcast packet into the relay.
+sendBroadcast(Socket, App, Message) ->
+	case sendByte(Socket, ?OP_BCAST) of
+		ok ->
+			case sendString(Socket, App) of
+				ok    -> sendBinary(Socket, Message);
+				Error -> Error
+			end;
+		Error -> Error
+	end.
+
 %% Assembles and serializes a close packet into the relay.
 sendClose(Socket) ->
 	sendByte(Socket, ?OP_CLOSE).
@@ -82,8 +91,51 @@ sendClose(Socket) ->
 %% Retrieves a single byte from the relay.
 recvByte(Socket) ->
 	case gen_tcp:recv(Socket, 1) of
-		{ok, Packet} -> hd(Packet);
-		Error        -> Error
+		{ok, <<Byte:8>>} -> Byte;
+		Error            -> Error
+	end.
+
+%% Retrieves a boolean from the relay.
+recvBool(Socket) ->
+	case recvByte(Socket) of
+		Error = {error, _Reason} -> Error;
+		0 -> false;
+		1 -> true;
+		_InvalidBool -> {error, violation}
+	end.
+
+%% Retrieves a variable int from the relay.
+recvVarint(Socket) ->
+	case recvByte(Socket) of
+		Error = {error, _Reason} -> Error;
+		Byte when Byte < 128     -> Byte;
+		Byte ->
+			case recvVarint(Socket) of
+				Error = {error, _Reason} -> Error;
+				Num                      -> Byte - 128 + 128 * Num
+			end
+	end.
+
+%% Retrieves a length-tagged binary array from the relay.
+recvBinary(Socket) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		Size ->
+			case gen_tcp:recv(Socket, Size) of
+				{ok, Binary} -> Binary;
+				Error        -> Error
+			end
+	end.
+
+%% Retrieves a length-tagged binary array from the relay.
+recvString(Socket) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		Size ->
+			case gen_tcp:recv(Socket, Size) of
+				{ok, Binary} -> erlang:bin_to_list(Binary);
+				Error        -> Error
+			end
 	end.
 
 %% Retrieves a connection initialization response and returns whether ok.
@@ -94,13 +146,25 @@ procInit(Socket) ->
 		_InvalidOpcode           -> {error, violation}
 	end.
 
+%% Retrieves a remote broadcast message from the relay and notifies the handler.
+procBroadcast(Socket, Handler) ->
+	case recvBinary(Socket) of
+		Error = {error, _Reason} -> Error;
+		Msg ->
+			Handler ! {broadcast, Msg},
+			ok
+	end.
+
 %% Retrieves messages from the client connection and keeps processing them until
 %% either the relay closes (graceful close) or the connection drops.
-process(Socket, Handler) ->
-	case recvByte(Socket) of
-		{error, Reason} -> exit(Reason);
-		?OP_CLOSE       -> exit(ok);
-		_InvalidOpcode  -> exit(violation)
+process(Socket, Owner, Handler) ->
+	Res = case recvByte(Socket) of
+		Error = {error, _} -> Error;
+		?OP_BCAST          -> procBroadcast(Socket, Handler);
+		?OP_CLOSE          -> exit(ok);
+		_InvalidOpcode     -> {error, violation}
 	end,
-	process(Socket, Handler).
-
+	case Res of
+		ok              -> process(Socket, Owner, Handler);
+		{error, Reason} -> exit(Reason)
+	end.

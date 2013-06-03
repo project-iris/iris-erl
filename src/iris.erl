@@ -9,8 +9,7 @@
 
 -module(iris).
 -export([reload/0]).
--export([connect/3, version/0, close/1]).
--export([broadcast/3]).
+-export([version/0, connect/2, broadcast/3, close/1]).
 
 %% @doc Returns the relay protocol version implemented. Connecting to an Iris
 %%      node will fail unless the versions match exactly.
@@ -21,25 +20,35 @@
 version() -> iris_proto:version().
 
 %% @doc Connects to the iris message relay running locally, registering with the
-%%      specified app name and setting the inbound event handler.
+%%      specified app name. The calling process will receive all events.
 %%
 %% @spec (Port, App, Handler) -> {ok, Connection} | {error, Reason}
 %%      Port       = integer()
 %%      App        = string()
-%%      Handler    = pid()
 %%      Connection = pid()
 %%      Reason     = term()
 %% @end
-connect(Port, App, Handler) ->
-	iris_relay:connect(Port, App, Handler).
+connect(Port, App) ->
+	iris_relay:connect(Port, App).
 
+%% @doc Broadcasts a message to all applications of type app. No guarantees are
+%%      made that all recipients receive the message (best effort).
+%%
+%%      The call blocks until the message is sent to the relay node.
+%%
+%% @spec (Connection, App, Message) -> ok | {error, Reason}
+%%      Connection = pid()
+%%      App        = string()
+%%      Message    = binary()
+%%      Reason     = term()
+%% @end
 broadcast(Connection, App, Message) ->
-  ok.
+	iris_relay:broadcast(Connection, App, Message).
 
 %% @doc Gracefully terminates the connection removing all subscriptions and
 %%      closing all tunnels.
 %%
-%%      The method blocks until the connection is torn down or an error occurs.
+%%      The call blocks until the connection is torn down or an error occurs.
 %%
 %% @spec (Connection) -> ok | {error, Reason}
 %%      Connection = pid()
@@ -49,7 +58,7 @@ close(Connection) ->
   iris_relay:close(Connection).
 
 %% =============================================================================
-%% Ugly dev hacks follow, nothing to see here :))
+%% Ugly dev hacks, run along, nothing to see here :))
 %% =============================================================================
 
 %% Reloads all iris related modules. Just a dev hack to make my life easier.
