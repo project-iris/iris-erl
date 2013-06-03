@@ -84,6 +84,25 @@ sendBroadcast(Socket, App, Message) ->
 		Error -> Error
 	end.
 
+%% Assembles and serializes a request packet into the relay.
+sendRequest(Socket, ReqId, App, Req, Timeout) ->
+	case sendByte(Socket, ?OP_REQ) of
+		ok ->
+			case sendVarint(Socket, ReqId) of
+				ok ->
+					case sendString(Socket, App) of
+						ok ->
+							case sendBinary(Socket, Req) of
+								ok    -> sendVarint(Socket, Timeout);
+								Error -> Error
+							end;
+						Error -> Error
+					end;
+				Error -> Error
+			end;
+		Error -> Error
+	end.
+
 %% Assembles and serializes a close packet into the relay.
 sendClose(Socket) ->
 	sendByte(Socket, ?OP_CLOSE).
@@ -155,16 +174,41 @@ procBroadcast(Socket, Handler) ->
 			ok
 	end.
 
+%% Retrieves a remote reply to a local request from the relay.
+procReply(Socket, Owner) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		ReqId ->
+			case recvBool(Socket) of
+				Error = {error, _Reason} -> Error;
+				true ->
+					Owner ! {reply, ReqId, {error, timeout}},
+					ok;
+				false ->
+					case recvBinary(Socket) of
+						Error = {error, _Reason} -> Error;
+						Reply ->
+							Owner ! {reply, ReqId, {ok, Reply}},
+							ok
+					end
+			end
+	end.
+
 %% Retrieves messages from the client connection and keeps processing them until
 %% either the relay closes (graceful close) or the connection drops.
 process(Socket, Owner, Handler) ->
 	Res = case recvByte(Socket) of
 		Error = {error, _} -> Error;
 		?OP_BCAST          -> procBroadcast(Socket, Handler);
+		?OP_REP            -> procReply(Socket, Owner);
 		?OP_CLOSE          -> exit(ok);
 		_InvalidOpcode     -> {error, violation}
 	end,
 	case Res of
-		ok              -> process(Socket, Owner, Handler);
+		ok ->
+			case process(Socket, Owner, Handler) of
+				ok -> ok;
+				{error, Reason} -> exit(Reason)
+			end;
 		{error, Reason} -> exit(Reason)
 	end.

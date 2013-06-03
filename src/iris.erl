@@ -9,7 +9,7 @@
 
 -module(iris).
 -export([reload/0]).
--export([version/0, connect/2, broadcast/3, close/1]).
+-export([version/0, connect/2, broadcast/3, request/4, close/1]).
 
 %% @doc Returns the relay protocol version implemented. Connecting to an Iris
 %%      node will fail unless the versions match exactly.
@@ -44,6 +44,22 @@ connect(Port, App) ->
 %% @end
 broadcast(Connection, App, Message) ->
 	iris_relay:broadcast(Connection, App, Message).
+
+%% @doc Executes a synchronous request to app, load balanced between all the
+%%      active ones, returning the received reply.
+%%
+%%      The call blocks until either a reply arrives or the request times out.
+%%
+%% @spec (Connection, App, Request, Timeout) -> {ok, Reply} | {error, Reason}
+%%      Connection = pid()
+%%      App        = string()
+%%      Request    = binary()
+%%      Reply      = binary()
+%%      Timeout    = int()>0
+%%      Reason     = term()
+%% @end
+request(Connection, App, Request, Timeout) ->
+	iris_relay:request(Connection, App, Request, Timeout).
 
 %% @doc Gracefully terminates the connection removing all subscriptions and
 %%      closing all tunnels.
