@@ -20,7 +20,7 @@
 
 %% Starts the gen_server responsible for the relay connection.
 connect(Port, App) ->
-	gen_server:start_link(?MODULE, {Port, App, self()}, []).
+	gen_server:start(?MODULE, {Port, App, self()}, []).
 
 %% Forwards a broadcasted message for relaying.
 broadcast(Connection, App, Message) ->
