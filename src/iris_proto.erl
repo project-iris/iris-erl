@@ -103,6 +103,17 @@ sendRequest(Socket, ReqId, App, Req, Timeout) ->
 		Error -> Error
 	end.
 
+%% Assembles and serializes a reply packet into the relay.
+sendReply(Socket, ReqId, Reply) ->
+	case sendByte(Socket, ?OP_REP) of
+		ok ->
+			case sendVarint(Socket, ReqId) of
+				ok    -> sendBinary(Socket, Reply);
+				Error -> Error
+			end;
+		Error -> Error
+	end.
+
 %% Assembles and serializes a close packet into the relay.
 sendClose(Socket) ->
 	sendByte(Socket, ?OP_CLOSE).
@@ -174,6 +185,19 @@ procBroadcast(Socket, Handler) ->
 			ok
 	end.
 
+%% Retrieves a remote request from the relay.
+procRequest(Socket, Owner, Handler) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		ReqId ->
+			case recvBinary(Socket) of
+				Error = {error, _Reason} -> Error;
+				Req ->
+					Handler ! {request, {Owner, ReqId}, Req},
+					ok
+			end
+	end.
+
 %% Retrieves a remote reply to a local request from the relay.
 procReply(Socket, Owner) ->
 	case recvVarint(Socket) of
@@ -200,6 +224,7 @@ process(Socket, Owner, Handler) ->
 	Res = case recvByte(Socket) of
 		Error = {error, _} -> Error;
 		?OP_BCAST          -> procBroadcast(Socket, Handler);
+		?OP_REQ            -> procRequest(Socket, Owner, Handler);
 		?OP_REP            -> procReply(Socket, Owner);
 		?OP_CLOSE          -> exit(ok);
 		_InvalidOpcode     -> {error, violation}

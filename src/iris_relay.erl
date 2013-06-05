@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
--export([connect/2, broadcast/3, request/4, close/1]).
+-export([connect/2, broadcast/3, request/4, reply/2, close/1]).
 
 %% =============================================================================
 %% External API functions
@@ -20,7 +20,7 @@
 
 %% Starts the gen_server responsible for the relay connection.
 connect(Port, App) ->
-	gen_server:start(?MODULE, {Port, App, self()}, []).
+	gen_server:start_link(?MODULE, {Port, App, self()}, []).
 
 %% Forwards a broadcasted message for relaying.
 broadcast(Connection, App, Message) ->
@@ -29,6 +29,10 @@ broadcast(Connection, App, Message) ->
 %% Forwards the request to the relay. Timeouts are handled relay side.
 request(Connection, App, Request, Timeout) ->
 	gen_server:call(Connection, {request, App, Request, Timeout}, infinity).
+
+%% Forwards an async reply to the relay to be sent back to the caller.
+reply({Connection, RequestId}, Reply) ->
+	gen_server:call(Connection, {reply, RequestId, Reply}, infinity).
 
 %% Notifies the relay server of a gracefull close request.
 close(Connection) ->
@@ -99,6 +103,10 @@ handle_call({request, App, Request, Timeout}, From, State = #state{sock = Sock})
 			ets:delete(State#state.reqPend, ReqId),
 			{reply, Error, NewState}
 	end;
+
+%% Relays a request reply to the Iris node.
+handle_call({reply, ReqId, Reply}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:sendReply(Sock, ReqId, Reply), State};
 
 %% Sends a gracefull close request to the relay. The reply should arrive async.
 handle_call(close, From, State = #state{sock = Sock}) ->

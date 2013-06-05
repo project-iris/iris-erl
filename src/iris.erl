@@ -9,7 +9,7 @@
 
 -module(iris).
 -export([reload/0]).
--export([version/0, connect/2, broadcast/3, request/4, close/1]).
+-export([version/0, connect/2, broadcast/3, request/4, reply/2, close/1]).
 
 %% @doc Returns the relay protocol version implemented. Connecting to an Iris
 %%      node will fail unless the versions match exactly.
@@ -60,6 +60,21 @@ broadcast(Connection, App, Message) ->
 %% @end
 request(Connection, App, Request, Timeout) ->
 	iris_relay:request(Connection, App, Request, Timeout).
+
+%% @doc Remote pair of the request function. Should be used to send back a reply
+%%      to the request origin.
+%%
+%%      The call blocks until the message is sent to the relay node.
+%%
+%%      Client must be the From argument provided in the request message.
+%%
+%% @spec (Client, Reply) -> ok | {error, Reason}
+%%      Client - see below
+%%      Reply  = binary()
+%%      Reason = term()
+%% @end
+reply(Client, Reply) ->
+	iris_relay:reply(Client, Reply).
 
 %% @doc Gracefully terminates the connection removing all subscriptions and
 %%      closing all tunnels.
