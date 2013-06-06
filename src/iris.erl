@@ -9,7 +9,8 @@
 
 -module(iris).
 -export([reload/0]).
--export([version/0, connect/2, broadcast/3, request/4, reply/2, close/1]).
+-export([version/0, connect/2, broadcast/3, request/4, reply/2,
+	subscribe/2, publish/3, unsubscribe/2, close/1]).
 
 %% @doc Returns the relay protocol version implemented. Connecting to an Iris
 %%      node will fail unless the versions match exactly.
@@ -75,6 +76,45 @@ request(Connection, App, Request, Timeout) ->
 %% @end
 reply(Client, Reply) ->
 	iris_relay:reply(Client, Reply).
+
+%% @doc Subscribes to a topic, receiving events as process messages.
+%%
+%%      The call blocks until the message is sent to the relay node.
+%%
+%% @spec (Connection, Topic) -> ok | {error, Reason}
+%%      Connection = pid()
+%%      Topic      = string()
+%%      Reason     = term()
+%% @end
+subscribe(Connection, Topic) ->
+	iris_relay:subscribe(Connection, Topic).
+
+%% @doc Publishes an event to all applications subscribed to the topic. No
+%%      guarantees are made that all subscribers receive the message (best
+%%      effort).
+%%
+%%      The call blocks until the message is sent to the relay node.
+%%
+%% @spec (Connection, Topic, Event) -> ok | {error, Reason}
+%%      Connection = pid()
+%%      Topic      = string()
+%%      Event      = binary()
+%%      Reason     = term()
+%% @end
+publish(Connection, Topic, Event) ->
+	iris_relay:publish(Connection, Topic, Event).
+
+%% @doc Unsubscribes from a previously subscribed topic.
+%%
+%%      The call blocks until the message is sent to the relay node.
+%%
+%% @spec (Connection, Topic) -> ok | {error, Reason}
+%%      Connection = pid()
+%%      Topic      = string()
+%%      Reason     = term()
+%% @end
+unsubscribe(Connection, Topic) ->
+	iris_relay:unsubscribe(Connection, Topic).
 
 %% @doc Gracefully terminates the connection removing all subscriptions and
 %%      closing all tunnels.

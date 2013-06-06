@@ -12,7 +12,8 @@
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
--export([connect/2, broadcast/3, request/4, reply/2, close/1]).
+-export([connect/2, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
+	unsubscribe/2, close/1]).
 
 %% =============================================================================
 %% External API functions
@@ -34,6 +35,18 @@ request(Connection, App, Request, Timeout) ->
 reply({Connection, RequestId}, Reply) ->
 	gen_server:call(Connection, {reply, RequestId, Reply}, infinity).
 
+%% Forwards the subscription request to the relay.
+subscribe(Connection, Topic) ->
+	gen_server:call(Connection, {subscribe, Topic}).
+
+%% Publishes a message to the topic.
+publish(Connection, Topic, Event) ->
+	gen_server:call(Connection, {publish, Topic, Event}).
+
+%% Forwards the subscription removal request to the relay.
+unsubscribe(Connection, Topic) ->
+	gen_server:call(Connection, {unsubscribe, Topic}).
+
 %% Notifies the relay server of a gracefull close request.
 close(Connection) ->
 	gen_server:call(Connection, close, infinity).
@@ -48,6 +61,7 @@ close(Connection) ->
 
 	reqIdx,   %% Index to assign the next request
 	reqPend,  %% Active requests waiting for a reply
+	subLive,  %% Active topic subscriptions
 
 	closer
 }).
@@ -71,11 +85,11 @@ init({Port, App, Handler}) ->
 							% Spawn the receiver thread and return
 							process_flag(trap_exit, true),
 							spawn_link(iris_proto, process, [Sock, self(), Handler]),
-							ReqPend = ets:new(requests, [set, private]),
 							{ok, #state{
 								sock    = Sock,
 								reqIdx  = 0,
-								reqPend = ReqPend,
+								reqPend = ets:new(requests, [set, private]),
+								subLive = ets:new(subscriptions, [set, private]),
 								closer  = nil
 							}};
 						{error, Reason} -> {stop, Reason}
@@ -93,7 +107,7 @@ handle_call({broadcast, App, Message}, _From, State = #state{sock = Sock}) ->
 handle_call({request, App, Request, Timeout}, From, State = #state{sock = Sock}) ->
 	% Create a reply channel for the results
 	ReqId = State#state.reqIdx,
-	ets:insert(State#state.reqPend, {ReqId, From}),
+	true = ets:insert_new(State#state.reqPend, {ReqId, From}),
 	NewState = State#state{reqIdx = ReqId+1},
 
 	% Send the request to the relay and finish with a pending reply
@@ -107,6 +121,27 @@ handle_call({request, App, Request, Timeout}, From, State = #state{sock = Sock})
 %% Relays a request reply to the Iris node.
 handle_call({reply, ReqId, Reply}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:sendReply(Sock, ReqId, Reply), State};
+
+%% Relays a subscription request to the Iris node (taking care of dupliactes).
+handle_call({subscribe, Topic}, _From, State = #state{sock = Sock}) ->
+	case ets:insert_new(State#state.subLive, {Topic}) of
+		true  -> {reply, iris_proto:sendSubscribe(Sock, Topic), State};
+		false -> {reply, {error, duplicate}}
+	end;
+
+%% Relays an event to the Iris node for topic publishing.
+handle_call({publish, Topic, Event}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:sendPublish(Sock, Topic, Event), State};
+
+%% Relays a subscription removal request to the Iris node (ensuring validity).
+handle_call({unsubscribe, Topic}, _From, State = #state{sock = Sock}) ->
+	% Make sure the subscription existed in the first hand
+	case ets:member(State#state.subLive, Topic) of
+		false -> {reply, {error, non_existent}};
+		true ->
+			ets:delete(State#state.subLive, Topic),
+			{reply, iris_proto:sendUnsubscribe(Sock, Topic), State}
+	end;
 
 %% Sends a gracefull close request to the relay. The reply should arrive async.
 handle_call(close, From, State = #state{sock = Sock}) ->

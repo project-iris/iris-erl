@@ -114,6 +114,31 @@ sendReply(Socket, ReqId, Reply) ->
 		Error -> Error
 	end.
 
+%% Assembles and serializes a subscription packet into the relay.
+sendSubscribe(Socket, Topic) ->
+	case sendByte(Socket, ?OP_SUB) of
+		ok    -> sendString(Socket, Topic);
+		Error -> Error
+	end.
+
+%% Assembles and serializes a message to be published in a topic.
+sendPublish(Socket, Topic, Message) ->
+	case sendByte(Socket, ?OP_PUB) of
+		ok ->
+			case sendString(Socket, Topic) of
+				ok    -> sendBinary(Socket, Message);
+				Error -> Error
+			end;
+		Error -> Error
+	end.
+
+%% Assembles and serializes a subscription removal packet into the relay.
+sendUnsubscribe(Socket, Topic) ->
+	case sendByte(Socket, ?OP_UNSUB) of
+		ok    -> sendString(Socket, Topic);
+		Error -> Error
+	end.
+
 %% Assembles and serializes a close packet into the relay.
 sendClose(Socket) ->
 	sendByte(Socket, ?OP_CLOSE).
@@ -163,7 +188,7 @@ recvString(Socket) ->
 		Error = {error, _Reason} -> Error;
 		Size ->
 			case gen_tcp:recv(Socket, Size) of
-				{ok, Binary} -> erlang:bin_to_list(Binary);
+				{ok, Binary} -> erlang:binary_to_list(Binary);
 				Error        -> Error
 			end
 	end.
@@ -218,6 +243,19 @@ procReply(Socket, Owner) ->
 			end
 	end.
 
+%% Retrieves a topic event from the relay.
+procPublish(Socket, Handler) ->
+	case recvString(Socket) of
+		Error = {error, _Reason} -> Error;
+		Topic ->
+			case recvBinary(Socket) of
+				Error = {error, _Reason} -> Error;
+				Msg ->
+					Handler ! {publish, Topic, Msg},
+					ok
+			end
+	end.
+
 %% Retrieves messages from the client connection and keeps processing them until
 %% either the relay closes (graceful close) or the connection drops.
 process(Socket, Owner, Handler) ->
@@ -226,6 +264,7 @@ process(Socket, Owner, Handler) ->
 		?OP_BCAST          -> procBroadcast(Socket, Handler);
 		?OP_REQ            -> procRequest(Socket, Owner, Handler);
 		?OP_REP            -> procReply(Socket, Owner);
+		?OP_PUB            -> procPublish(Socket, Handler);
 		?OP_CLOSE          -> exit(ok);
 		_InvalidOpcode     -> {error, violation}
 	end,
