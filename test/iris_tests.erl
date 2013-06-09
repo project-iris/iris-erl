@@ -8,7 +8,7 @@
 %% Author: peterke@gmail.com (Peter Szilagyi)
 
 -module(iris_tests).
--export([broadcast_inst/2, reqrep_req/4, reqrep_rep/2]).
+-export([broadcast_inst/2, reqrep_req/4, reqrep_rep/2, pubsub_inst/3]).
 -include_lib("eunit/include/eunit.hrl").
 
 %% =============================================================================
@@ -43,11 +43,10 @@ close(Conn) ->
 broadcast_test() ->
 	Reps = lists:seq(0, 10),
 	Apps = lists:map(fun(Id) ->	io_lib:format("broadcast-~p", [Id]) end, Reps),
-	lists:map(fun(Id) -> broadcast_suite(Id, 10) end, Apps).
+	lists:map(fun(Id) -> broadcast_suite(Id, 100) end, Apps).
 
 %% Runs a single broadcast test suite, spawning a number of processes that send
 %% each other the application id.
-broadcast_suite(_Id, 0) -> ok;
 broadcast_suite(Id, Instances) ->
 	% Start up N-1 concurrent processes
 	lists:foreach(fun(_) ->
@@ -162,6 +161,69 @@ reqrep_rep(Id, Exchanges) ->
 
   % TODO: Temp fix for a minor race condition (reply and immediate close)
 	timer:sleep(50),
+
+	% Tear down the connection
+	close(Conn).
+
+
+%% =============================================================================
+%% Publish/Subscribe tests
+%% =============================================================================
+
+%% Creates a handfull of connections, all subscribe to the same topic, each
+%% publishing a few events. If all goes well, repeat.
+pubsub_test() ->
+	Reps = lists:seq(0, 9),
+	Apps = lists:map(fun(Id) ->	io_lib:format("pubsub-~B", [Id]) end, Reps),
+	lists:map(fun(Id) -> pubsub_suite(Id, 10, 10) end, Apps).
+
+pubsub_suite(Id, Instances, Events) ->
+	% Start up N-1 concurrent processes
+	lists:foreach(fun(_) ->
+		spawn(?MODULE, pubsub_inst, [Id, Instances, Events])
+	end, lists:seq(0, Instances-2)),
+
+	% Start the last synced
+	pubsub_inst(Id, Instances, Events).
+
+%% Executes a single instance of the pubsub server.
+pubsub_inst(Id, Instances, Events) ->
+	% Connect to the Iris network and subscribe to the same topic
+	Conn = connect(Id),
+	?assertMatch(ok, iris:subscribe(Conn, Id)),
+
+	% Sleep a while to wait for all other connecting instances
+	timer:sleep(50),
+
+	% Publish all events
+	lists:foreach(fun(_) ->
+		?assertMatch(ok, iris:publish(Conn, Id, list_to_binary(Id)))
+	end, lists:seq(0, Events-1)),
+
+	% Wait for all events
+	lists:foreach(fun(_) ->
+		receive
+			Msg ->
+				% Make sure format and content match requirements
+				?assertMatch({publish, _, _}, Msg),
+				?assert(lists:flatten(Id) =:= element(2, Msg)),
+				?assert(list_to_binary(Id) =:= element(3, Msg))
+		after
+			1000 -> throw(timeout)
+		end
+	end, lists:seq(0, Instances*Events - 1)),
+
+	% Unsubscribe and wait for others to do the same
+	?assertMatch(ok, iris:unsubscribe(Conn, Id)),
+	timer:sleep(50),
+
+	% Make sure further events don't get through
+	?assertMatch(ok, iris:publish(Conn, Id, list_to_binary(Id))),
+	receive
+		_ -> ?assert(false)
+	after
+		100 -> ok
+	end,
 
 	% Tear down the connection
 	close(Conn).
