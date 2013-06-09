@@ -10,22 +10,24 @@
 -module(iris_proto).
 
 -export([version/0]).
--compile(export_all).
+-export([sendInit/2, sendBroadcast/3, sendRequest/5, sendReply/3,
+	sendSubscribe/2, sendPublish/3, sendUnsubscribe/2, sendClose/1,
+	sendTunnelRequest/5, sendTunnelReply/4, sendTunnelData/3, sendTunnelAck/2,
+	sendTunnelClose/2, process/3, procInit/1]).
 
--define(OP_INIT,     16#00).
--define(OP_BCAST,    16#01).
--define(OP_REQ,      16#02).
--define(OP_REP,      16#03).
--define(OP_SUB,      16#04).
--define(OP_PUB,      16#05).
--define(OP_UNSUB,    16#06).
--define(OP_CLOSE,    16#07).
--define(OP_TUNREQ,   16#07).
--define(OP_TUNREP,   16#08).
--define(OP_TUNACK,   16#0a).
--define(OP_TUNDATA,  16#0b).
--define(OP_TUNPOLL,  16#0c).
--define(OP_TUNCLOSE, 16#0d).
+-define(OP_INIT,      16#00). %% Connection initialization
+-define(OP_BCAST,     16#01). %% Application broadcast
+-define(OP_REQ,       16#02). %% Application request
+-define(OP_REP,       16#03). %% Application reply
+-define(OP_SUB,       16#04). %% Topic subscription
+-define(OP_PUB,       16#05). %% Topic publish
+-define(OP_UNSUB,     16#06). %% Topic subscription removal
+-define(OP_CLOSE,     16#07). %% Connection closing
+-define(OP_TUN_REQ,   16#08). %% Tunnel building request
+-define(OP_TUN_REP,   16#09). %% Tunnel building reply
+-define(OP_TUN_DATA,  16#0a). %% Tunnel data transfer
+-define(OP_TUN_ACK,   16#0b). %% Tunnel data acknowledgement
+-define(OP_TUN_CLOSE, 16#0c). %% Tunnel closing
 
 %% Implemented relay protocol version.
 version() -> "v1.0".
@@ -33,13 +35,6 @@ version() -> "v1.0".
 %% Serializes a single byte into the relay.
 sendByte(Socket, Byte) ->
 	gen_tcp:send(Socket, [Byte]).
-
-%% Serializes a boolean into the relay.
-sendBool(Socket, Bool) ->
-	case Bool of
-		true  -> sendByte(Socket, 1);
-		false -> sendByte(Socket, 0)
-	end.
 
 %% Serializes a variable int into the relay.
 sendVarint(Socket, Num) when Num < 128 -> sendByte(Socket, Num);
@@ -142,6 +137,65 @@ sendUnsubscribe(Socket, Topic) ->
 %% Assembles and serializes a close packet into the relay.
 sendClose(Socket) ->
 	sendByte(Socket, ?OP_CLOSE).
+
+%% Assembles and serializes a tunneling packet into the relay.
+sendTunnelRequest(Socket, TunId, App, Buffer, Timeout) ->
+	case sendByte(Socket, ?OP_TUN_REQ) of
+		ok ->
+			case sendVarint(Socket, TunId) of
+				ok ->
+					case sendString(Socket, App) of
+						ok ->
+							case sendVarint(Socket, Buffer) of
+								ok    -> sendVarint(Socket, Timeout);
+								Error -> Error
+							end;
+						Error -> Error
+					end;
+				Error -> Error
+			end;
+		Error -> Error
+	end.
+
+%% Assembles and serializes a tunneling confirmation packet into the relay.
+sendTunnelReply(Socket, TmpId, TunId, Buffer) ->
+	case sendByte(Socket, ?OP_TUN_REP) of
+		ok ->
+			case sendVarint(Socket, TmpId) of
+				ok ->
+					case sendVarint(Socket, TunId) of
+						ok    -> sendVarint(Socket, Buffer);
+						Error -> Error
+					end;
+				Error -> Error
+			end;
+		Error -> Error
+	end.
+
+%% Assembles and serializes a tunnel data packet into the relay.
+sendTunnelData(Socket, TunId, Message) ->
+	case sendByte(Socket, ?OP_TUN_DATA) of
+		ok ->
+			case sendVarint(Socket, TunId) of
+				ok    -> sendBinary(Socket, Message);
+				Error -> Error
+			end;
+		Error -> Error
+	end.
+
+%% Assembles and serializes a tunnel data acknowledgement into the relay.
+sendTunnelAck(Socket, TunId) ->
+	case sendByte(Socket, ?OP_TUN_ACK) of
+		ok    -> sendVarint(Socket, TunId);
+		Error -> Error
+	end.
+
+%% Assembles and serializes a tunnel termination message into the relay.
+sendTunnelClose(Socket, TunId) ->
+	case sendByte(Socket, ?OP_TUN_CLOSE) of
+		ok    -> sendVarint(Socket, TunId);
+		Error -> Error
+	end.
 
 %% Retrieves a single byte from the relay.
 recvByte(Socket) ->
@@ -256,6 +310,70 @@ procPublish(Socket, Handler) ->
 			end
 	end.
 
+%% Retrieves a remote tunneling request from the relay.
+procTunnelRequest(Socket, Owner) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		TmpId ->
+			case recvVarint(Socket) of
+				Error = {error, _Reason} -> Error;
+				Buffer ->
+					Owner ! {tunnel_request, TmpId, Buffer},
+					ok
+			end
+	end.
+
+%% Retrieves the remote reply to a local tunneling request from the relay.
+procTunnelReply(Socket, Owner) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		TunId ->
+			case recvBool(Socket) of
+				Error = {error, _Reason} -> Error;
+				true ->
+					Owner ! {tunnel_reply, TunId, {error, timeout}},
+					ok;
+				false ->
+					case recvVarint(Socket) of
+						Error = {error, _Reason} -> Error;
+						Buffer ->
+							Owner ! {tunnel_reply, TunId, {ok, Buffer}},
+							ok
+					end
+			end
+	end.
+
+%% Retrieves a remote tunnel data message.
+procTunnelData(Socket, Owner) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		TunId ->
+			case recvBinary(Socket) of
+				Error = {error, _Reason} -> Error;
+				Msg ->
+					Owner ! {tunnel_data, TunId, Msg},
+					ok
+			end
+	end.
+
+%% Retrieves a remote tunnel message acknowledgement.
+procTunnelAck(Socket, Owner) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		TunId ->
+			Owner ! {tunnel_ack, TunId},
+			ok
+	end.
+
+%% Retrieves the remote closure of a tunnel.
+procTunnelClose(Socket, Owner) ->
+	case recvVarint(Socket) of
+		Error = {error, _Reason} -> Error;
+		TunId ->
+			Owner ! {tunnel_close, TunId},
+			ok
+	end.
+
 %% Retrieves messages from the client connection and keeps processing them until
 %% either the relay closes (graceful close) or the connection drops.
 process(Socket, Owner, Handler) ->
@@ -265,6 +383,11 @@ process(Socket, Owner, Handler) ->
 		?OP_REQ            -> procRequest(Socket, Owner, Handler);
 		?OP_REP            -> procReply(Socket, Owner);
 		?OP_PUB            -> procPublish(Socket, Handler);
+		?OP_TUN_REQ        -> procTunnelRequest(Socket, Owner);
+		?OP_TUN_REP        -> procTunnelReply(Socket, Owner);
+		?OP_TUN_DATA       -> procTunnelData(Socket, Owner);
+		?OP_TUN_ACK        -> procTunnelAck(Socket, Owner);
+		?OP_TUN_CLOSE      -> procTunnelClose(Socket, Owner);
 		?OP_CLOSE          -> exit(ok);
 		_InvalidOpcode     -> {error, violation}
 	end,

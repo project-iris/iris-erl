@@ -10,10 +10,10 @@
 -module(iris_relay).
 
 -behaviour(gen_server).
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+-export([init/1, handle_call/3, handle_info/2, terminate/2]).
 
 -export([connect/2, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
-	unsubscribe/2, close/1]).
+	unsubscribe/2, tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2, close/1]).
 
 %% =============================================================================
 %% External API functions
@@ -37,15 +37,31 @@ reply({Connection, RequestId}, Reply) ->
 
 %% Forwards the subscription request to the relay.
 subscribe(Connection, Topic) ->
-	gen_server:call(Connection, {subscribe, Topic}).
+	gen_server:call(Connection, {subscribe, Topic}, infinity).
 
 %% Publishes a message to the topic.
 publish(Connection, Topic, Event) ->
-	gen_server:call(Connection, {publish, Topic, Event}).
+	gen_server:call(Connection, {publish, Topic, Event}, infinity).
 
 %% Forwards the subscription removal request to the relay.
 unsubscribe(Connection, Topic) ->
-	gen_server:call(Connection, {unsubscribe, Topic}).
+	gen_server:call(Connection, {unsubscribe, Topic}, infinity).
+
+%% Forwards a tunneling request to the relay.
+tunnel(Connection, App, Timeout) ->
+	gen_server:call(Connection, {tunnel, App, Timeout}, infinity).
+
+%% Forwards a tunnel data packet to the relay.
+tunnel_send(Connection, TunId, Message) ->
+	gen_server:call(Connection, {tunnel_send, TunId, Message}, infinity).
+
+%% Forwards a tunnel data acknowledgement to the relay.
+tunnel_ack(Connection, TunId) ->
+	gen_server:call(Connection, {tunnel_ack, TunId}, infinity).
+
+%% Forwards a tunnel close request to the relay.
+tunnel_close(Connection, TunId) ->
+	gen_server:call(Connection, {tunnel_close, TunId}, infinity).
 
 %% Notifies the relay server of a gracefull close request.
 close(Connection) ->
@@ -58,12 +74,18 @@ close(Connection) ->
 
 -record(state, {
 	sock,     %% Network connection to the iris node
+	handler,  %% Handler for connection events
 
 	reqIdx,   %% Index to assign the next request
 	reqPend,  %% Active requests waiting for a reply
+
 	subLive,  %% Active topic subscriptions
 
-	closer
+	tunIdx,   %% Index to assign the next tunnel
+	tunPend,  %% Tunnels in the process of creation
+	tunLive,  %% Active tunnels
+
+	closer    %% Process requesting the relay closure
 }).
 
 
@@ -87,9 +109,13 @@ init({Port, App, Handler}) ->
 							spawn_link(iris_proto, process, [Sock, self(), Handler]),
 							{ok, #state{
 								sock    = Sock,
+								handler = Handler,
 								reqIdx  = 0,
 								reqPend = ets:new(requests, [set, private]),
 								subLive = ets:new(subscriptions, [set, private]),
+								tunIdx  = 0,
+								tunPend = ets:new(tunnels_pending, [set, private]),
+								tunLive = ets:new(tunnels, [set, private]),
 								closer  = nil
 							}};
 						{error, Reason} -> {stop, Reason}
@@ -103,7 +129,7 @@ init({Port, App, Handler}) ->
 handle_call({broadcast, App, Message}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:sendBroadcast(Sock, App, Message), State};
 
-%% Relays a request to the Iris node, waiting async with a result channel for the reply.
+%% Relays a request to the Iris node, waiting async for the reply.
 handle_call({request, App, Request, Timeout}, From, State = #state{sock = Sock}) ->
 	% Create a reply channel for the results
 	ReqId = State#state.reqIdx,
@@ -150,15 +176,33 @@ handle_call(close, From, State = #state{sock = Sock}) ->
 		Error = {error, Reason} -> {stop, Reason, Error, State}
 	end;
 
-%% @doc Handles a subscription event. Depending on the Return flag, the specified queue might be set as the return queue
-%%      for requests (basically if a sync call is made, that's where the result will arrive).
-%% @end
-handle_call(Message, From, State) ->
-	io:format("Unknown call: ~p~p~p~n", [Message, From, State]),
-	{reply, ok, State}.
+%% Relays a tunneling request to the Iris node, waiting async with for the reply.
+handle_call({tunnel, App, Timeout}, From, State = #state{sock = Sock}) ->
+	% Create a result channel for the tunneling reply
+	TunId = State#state.tunIdx,
+	true = ets:insert_new(State#state.tunPend, {TunId, From}),
+	NewState = State#state{tunIdx = TunId+1},
 
-handle_cast(stop, State) ->
-	{stop, normal, State}.
+	% Send the request to the relay and finish with a pending reply
+	case iris_proto:sendTunnelRequest(Sock, TunId, App, iris_tunnel:buffer(), Timeout) of
+		ok    -> {noreply, NewState};
+		Error ->
+			ets:delete(State#state.tunPend, TunId),
+			{reply, Error, NewState}
+	end;
+
+%% Relays a tunnel data packet to the Iris node.
+handle_call({tunnel_send, TunId, Message}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:sendTunnelData(Sock, TunId, Message), State};
+
+%% Relays a tunnel acknowledgement to the Iris node.
+handle_call({tunnel_ack, TunId}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:sendTunnelAck(Sock, TunId), State};
+
+%% Forwards a tunnel closing request to the relay if not yet closed remotely and
+%% removes the tunnel from the local state.
+handle_call({tunnel_close, TunId}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:sendTunnelClose(Sock, TunId), State}.
 
 %% Delivers a reply to a pending request.
 handle_info({reply, ReqId, Reply}, State) ->
@@ -169,6 +213,63 @@ handle_info({reply, ReqId, Reply}, State) ->
 	% Reply to the pending process and return
 	gen_server:reply(Pending, Reply),
 	{noreply, State};
+
+%% Accepts an incoming tunneling request from a remote app, assembling a local
+%% tunnel with the given send window and replies to the relay with the final
+%% permanent tunnel id.
+handle_info({tunnel_request, TmpId, Buffer}, State = #state{sock = Sock}) ->
+	% Create the local tunnel endpoint
+	TunId = State#state.tunIdx,
+	{ok, Tunnel} = gen_server:start(iris_tunnel, {self(), TunId, Buffer}, []),
+	true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
+
+	% Acknowledge the tunnel creation to the relay
+	ok = iris_proto:sendTunnelReply(Sock, TmpId, TunId, iris_tunnel:buffer()),
+
+	% Notify the handler of the new tunnel
+	State#state.handler ! {tunnel, Tunnel},
+	{noreply, State#state{tunIdx = TunId+1}};
+
+% Delivers a reply to a pending tunneling request.
+handle_info({tunnel_reply, TunId, Reply}, State) ->
+	% Fetch the result channel and remove from state
+	{TunId, Pending} = hd(ets:lookup(State#state.tunPend, TunId)),
+	ets:delete(State#state.tunPend, TunId),
+
+	% Reply to the pending process and return
+	Result = case Reply of
+		{ok, Buffer} ->
+			case gen_server:start(iris_tunnel, {self(), TunId, Buffer}, []) of
+				{ok, Tunnel} ->
+					% Save the live tunnel
+					true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
+					{ok, Tunnel};
+				Error -> Error
+			end;
+		Error -> Error
+	end,
+	gen_server:reply(Pending, Result),
+	{noreply, State};
+
+% Delivers a data packet to a specific tunnel.
+handle_info({tunnel_data, TunId, Message}, State) ->
+	{TunId, Tunnel} = hd(ets:lookup(State#state.tunLive, TunId)),
+	Tunnel ! {data, Message},
+	{noreply, State};
+
+% Delivers a data acknowledgement to a specific tunnel.
+handle_info({tunnel_ack, TunId}, State) ->
+	{TunId, Tunnel} = hd(ets:lookup(State#state.tunLive, TunId)),
+	Tunnel ! ack,
+	{noreply, State};
+
+%% Closes a tunnel connection, removing it from the local state.
+handle_info({tunnel_close, TunId}, State) ->
+	{TunId, Tunnel} = hd(ets:lookup(State#state.tunLive, TunId)),
+  ets:delete(State#state.tunLive, TunId),
+
+  Tunnel ! close,
+  {noreply, State};
 
 %% Handles the termination of the receiver thread: either returns a clean exit
 %% or notifies the handler of a drop.

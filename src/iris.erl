@@ -10,7 +10,7 @@
 -module(iris).
 -export([reload/0]).
 -export([version/0, connect/2, broadcast/3, request/4, reply/2,
-	subscribe/2, publish/3, unsubscribe/2, close/1]).
+	subscribe/2, publish/3, unsubscribe/2, tunnel/3, close/1]).
 
 %% @doc Returns the relay protocol version implemented. Connecting to an Iris
 %%      node will fail unless the versions match exactly.
@@ -115,6 +115,21 @@ publish(Connection, Topic, Event) ->
 %% @end
 unsubscribe(Connection, Topic) ->
 	iris_relay:unsubscribe(Connection, Topic).
+
+%% @doc Opens a direct tunnel to an instance of app, allowing pairwise-exclusive
+%%      and order-guaranteed message passing between them.
+%%
+%%      The call blocks until the either the newly created tunnel is set up, or
+%%      a timeout occurs.
+%%
+%% @spec (Connection, App, Timeout) -> ok | {error, Reason}
+%%      Connection = pid()
+%%      App        = string()
+%%      Timeout    = int()>0
+%%      Reason     = term()
+%% @end
+tunnel(Connection, App, Timeout) ->
+	iris_relay:tunnel(Connection, App, Timeout).
 
 %% @doc Gracefully terminates the connection removing all subscriptions and
 %%      closing all tunnels.
