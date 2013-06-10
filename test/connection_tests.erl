@@ -29,7 +29,7 @@ single_test() ->
 	receive
 		init -> ok
 	after
-		100 -> throw(init_timeout)
+		250 -> throw(init_timeout)
 	end,
 
 	% Terminate the server, checking success and terminate call
@@ -37,13 +37,13 @@ single_test() ->
 	receive
 		terminate -> ok
 	after
-		100 -> throw(term_timeout)
+		250 -> throw(term_timeout)
 	end.
 
 %% Starts a handful of concurrent Iris servers and checks startup and shutdown.
 multi_test() ->
+	% Number of concurrent connections to initiate
 	Count = 100,
-	Seq = lists:seq(1, Count),
 
 	% Start the servers concurrently
 	lists:foreach(fun(_) ->
@@ -54,14 +54,14 @@ multi_test() ->
 			receive
 				init -> Parent ! {ok, self()}
 			after
-				100 -> throw(init_timeout)
+				250 -> throw(init_timeout)
 			end,
 
 			% Wait for permission to continue
 			receive
 				cont -> ok
 			after
-				100 -> throw(cont_timeout)
+				250 -> throw(cont_timeout)
 			end,
 
 			% Terminate the server and signal parent
@@ -69,19 +69,19 @@ multi_test() ->
 			receive
 				terminate -> Parent ! done
 			after
-				100 -> throw(term_timeout)
+				250 -> throw(term_timeout)
 			end
 		end)
-	end, Seq),
+	end, lists:seq(1, Count)),
 
 	% Wait for all the inits
 	Pids = lists:map(fun(_) ->
 		receive
 			{ok, Pid} -> Pid
 		after
-			100 -> throw(start_timeout)
+			250 -> throw(start_timeout)
 		end
-	end, Seq),
+	end, lists:seq(1, Count)),
 
 	% Permit all servers to shut down
 	lists:foreach(fun(Pid) -> Pid ! cont end, Pids),
@@ -91,9 +91,10 @@ multi_test() ->
 		receive
 			done -> ok
 		after
-			100 -> throw(close_timeout)
+			250 -> throw(close_timeout)
 		end
-	end, Seq).
+	end, lists:seq(1, Count)).
+
 
 %% =============================================================================
 %% Iris server callback methods
@@ -107,6 +108,7 @@ init(Parent) ->
 %% Notifies the tester of the successful terminate call.
 terminate(_Reason, {state, Parent}) ->
 	Parent ! terminate.
+
 
 %% =============================================================================
 %% Unused Iris server callback methods (shuts the compiler up)
