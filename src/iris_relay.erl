@@ -8,12 +8,13 @@
 %% Author: peterke@gmail.com (Peter Szilagyi)
 
 -module(iris_relay).
-
--behaviour(gen_server).
--export([init/1, handle_call/3, handle_info/2, terminate/2]).
-
 -export([connect/2, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2, close/1]).
+
+-behaviour(gen_server).
+-export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
+	code_change/3]).
+
 
 %% =============================================================================
 %% External API functions
@@ -21,7 +22,7 @@
 
 %% Starts the gen_server responsible for the relay connection.
 connect(Port, App) ->
-	gen_server:start_link(?MODULE, {Port, App, self()}, []).
+	gen_server:start(?MODULE, {Port, App, self()}, []).
 
 %% Forwards a broadcasted message for relaying.
 broadcast(Connection, App, Message) ->
@@ -279,9 +280,10 @@ handle_info({'EXIT', _Pid, Reason}, State) ->
 		gen_server:reply(Pid, {error, terminating})
 	end, ets:tab2list(State#state.reqPend)),
 
-	% Terminate, notifying the closer if needed
+	% Terminate, notifying either the closer or the handler
 	case State#state.closer of
 		nil ->
+			State#state.handler ! {drop, Reason},
 			{stop, Reason, State};
 		Pid ->
 			gen_server:reply(Pid, ok),
@@ -291,3 +293,14 @@ handle_info({'EXIT', _Pid, Reason}, State) ->
 %% Final cleanup, close up the relay link.
 terminate(_Reason, State) ->
 	gen_tcp:close(State#state.sock).
+
+
+%% =============================================================================
+%% Unused generic server methods
+%% =============================================================================
+
+code_change(_OldVsn, _State, _Extra) ->
+	{error, unimplemented}.
+
+handle_cast(_Request, State) ->
+	{stop, unimplemented, State}.
