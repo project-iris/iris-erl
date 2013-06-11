@@ -11,8 +11,8 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -behaviour(iris_server).
--export([init/1, handle_broadcast/2, handle_request/3, handle_publish/3,
-	handle_tunnel/2, handle_drop/2, terminate/2]).
+-export([init/1, handle_broadcast/3, handle_request/4, handle_publish/4,
+	handle_tunnel/3, handle_drop/2, terminate/2]).
 
 %% Local Iris node's listener port
 -define(RELAY_PORT, 55555).
@@ -25,7 +25,7 @@
 %% Starts a single Iris server and checks startup and shutdown.
 single_test() ->
 	% Start the server, checking success and init call
-	{ok, Server} = iris_server:start(?RELAY_PORT, "single", ?MODULE, self()),
+	{ok, Server, _Link} = iris_server:start(?RELAY_PORT, "single", ?MODULE, self()),
 	receive
 		init -> ok
 	after
@@ -33,7 +33,7 @@ single_test() ->
 	end,
 
 	% Terminate the server, checking success and terminate call
-	ok = iris_server:close(Server),
+	ok = iris_server:stop(Server),
 	receive
 		terminate -> ok
 	after
@@ -50,7 +50,7 @@ multi_test() ->
 		Parent = self(),
 		spawn(fun() ->
 			% Start a single server and signal parent
-			{ok, Server} = iris_server:start(?RELAY_PORT, "multi", ?MODULE, self()),
+			{ok, Server, _Link} = iris_server:start(?RELAY_PORT, "multi", ?MODULE, self()),
 			receive
 				init -> Parent ! {ok, self()}
 			after
@@ -65,7 +65,7 @@ multi_test() ->
 			end,
 
 			% Terminate the server and signal parent
-			ok = iris_server:close(Server),
+			ok = iris_server:stop(Server),
 			receive
 				terminate -> Parent ! done
 			after
@@ -114,16 +114,16 @@ terminate(_Reason, {state, Parent}) ->
 %% Unused Iris server callback methods (shuts the compiler up)
 %% =============================================================================
 
-handle_broadcast(_Message, State) ->
+handle_broadcast(_Message, State, _Link) ->
 	{stop, unimplemented, State}.
 
-handle_request(_Request, _From, State) ->
+handle_request(_Request, _From, State, _Link) ->
 	{stop, unimplemented, State}.
 
-handle_publish(_Topic, _Event, State) ->
+handle_publish(_Topic, _Event, State, _Link) ->
 	{stop, unimplemented, State}.
 
-handle_tunnel(_Tunnel, State) ->
+handle_tunnel(_Tunnel, State, _Link) ->
 	{stop, unimplemented, State}.
 
 handle_drop(_Reason, State) ->
