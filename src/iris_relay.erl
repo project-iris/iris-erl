@@ -7,6 +7,8 @@
 %%
 %% Author: peterke@gmail.com (Peter Szilagyi)
 
+%% @private
+
 -module(iris_relay).
 -export([connect/2, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2, close/1]).

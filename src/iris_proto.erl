@@ -7,6 +7,8 @@
 %%
 %% Author: peterke@gmail.com (Peter Szilagyi)
 
+%% @private
+
 -module(iris_proto).
 
 -export([version/0]).

@@ -8,12 +8,14 @@
 %% Author: peterke@gmail.com (Peter Szilagyi)
 
 -module(iris_tunnel).
-
--behaviour(gen_server).
--export([init/1, handle_call/3, handle_info/2, terminate/2]).
 -export([buffer/0, send/3, recv/2, close/1]).
 
+-behaviour(gen_server).
+-export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
+	code_change/3]).
+
 %% Iris to app buffer size for flow control.
+%% @private
 buffer() -> 128.
 
 %% =============================================================================
@@ -26,7 +28,7 @@ buffer() -> 128.
 %% @spec (Tunnel, Message, Timeout) -> ok | {error, Reason}
 %%      Tunnel  = pid()
 %%      Message = binary()
-%%      Timeout = int()>0
+%%      Timeout = int()
 %%      Reason  = term()
 %% @end
 send(Tunnel, Message, Timeout) ->
@@ -36,7 +38,7 @@ send(Tunnel, Message, Timeout) ->
 %%
 %% @spec (Tunnel, Timeout) -> {ok, Message} | {error, Reason}
 %%      Tunnel  = pid()
-%%      Timeout = int()>0
+%%      Timeout = int()
 %%      Message = binary()
 %%      Reason  = term()
 %% @end
@@ -77,6 +79,7 @@ close(Tunnel) ->
 %% =============================================================================
 
 %% Initializes the tunnel with the two asymmetric buffers.
+%% @private
 init({Relay, TunId, Buffer}) ->
 	{ok, #state{
 		tunid     = TunId,
@@ -90,6 +93,7 @@ init({Relay, TunId, Buffer}) ->
 
 %% Forwards an outbound message to the remote endpoint of the relay. If the send
 %% limit is reached, then the call is blocked and a coutdown timer started.
+%% @private
 handle_call({send, _Message, _Timeout}, _From, State = #state{term = true}) ->
 	{reply, {error, closed}, State};
 
@@ -128,6 +132,7 @@ handle_call(close, _From, State = #state{}) ->
 
 %% Notifies the pending send of failure due to timeout. In the rare case of the
 %% timeout happening right before the timer is canceled, the event is dropped.
+%% @private
 handle_info({timeout, send, Id}, State = #state{atoiTasks = Pend}) ->
 	case lists:keyfind(Id, 1, Pend) of
 		false            -> ok;
@@ -177,4 +182,18 @@ handle_info(close, State) ->
 	{noreply, State#state{term = true}}.
 
 %% Cleanup method, does nothing really.
+%% @private
 terminate(_Reason, _State) -> ok.
+
+
+%% =============================================================================
+%% Unused generic server methods
+%% =============================================================================
+
+%% @private
+code_change(_OldVsn, _State, _Extra) ->
+	{error, unimplemented}.
+
+%% @private
+handle_cast(_Request, State) ->
+	{stop, unimplemented, State}.
