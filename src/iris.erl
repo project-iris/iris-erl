@@ -8,7 +8,6 @@
 %% Author: peterke@gmail.com (Peter Szilagyi)
 
 -module(iris).
--export([reload/0]).
 -export([connect/2, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, close/1]).
 
@@ -42,10 +41,10 @@
 %%      Port       = pos_integer()
 %%      App        = string()
 %%      Connection = connection()
-%%      Reason     = term()
+%%      Reason     = atom()
 %% @end
 -spec connect(Port :: pos_integer(), App :: string()) ->
-	{ok, Connection :: connection()} | {error, Reason :: term()}.
+	{ok, Connection :: connection()} | {error, Reason :: atom()}.
 
 connect(Port, App) ->
 	iris_relay:connect(Port, App).
@@ -59,8 +58,11 @@ connect(Port, App) ->
 %%      Connection = connection()
 %%      App        = string()
 %%      Message    = binary()
-%%      Reason     = term()
+%%      Reason     = atom()
 %% @end
+-spec broadcast(Connection :: connection(), App :: string(), Message :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 broadcast(Connection, App, Message) ->
 	iris_relay:broadcast(Connection, App, Message).
 
@@ -75,8 +77,11 @@ broadcast(Connection, App, Message) ->
 %%      Request    = binary()
 %%      Timeout    = pos_integer()
 %%      Reply      = binary()
-%%      Reason     = term()
+%%      Reason     = timeout | atom()
 %% @end
+-spec request(Connection :: connection(), App :: string(), Request :: binary(), Timeout :: pos_integer()) ->
+	{ok, Reply :: binary()} | {error, Reason :: atom()}.
+
 request(Connection, App, Request, Timeout) ->
 	iris_relay:request(Connection, App, Request, Timeout).
 
@@ -90,8 +95,11 @@ request(Connection, App, Request, Timeout) ->
 %% @spec (Sender, Reply) -> ok | {error, Reason}
 %%      Sender = sender()
 %%      Reply  = binary()
-%%      Reason = term()
+%%      Reason = atom()
 %% @end
+-spec reply(Sender :: iris:sender(), Reply :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 reply(Sender, Reply) ->
 	iris_relay:reply(Sender, Reply).
 
@@ -102,8 +110,11 @@ reply(Sender, Reply) ->
 %% @spec (Connection, Topic) -> ok | {error, Reason}
 %%      Connection = connection()
 %%      Topic      = string()
-%%      Reason     = term()
+%%      Reason     = atom()
 %% @end
+-spec subscribe(Connection :: connection(), Topic :: string()) ->
+	ok | {error, Reason :: atom()}.
+
 subscribe(Connection, Topic) ->
 	iris_relay:subscribe(Connection, Topic).
 
@@ -117,8 +128,11 @@ subscribe(Connection, Topic) ->
 %%      Connection = connection()
 %%      Topic      = string()
 %%      Event      = binary()
-%%      Reason     = term()
+%%      Reason     = atom()
 %% @end
+-spec publish(Connection :: connection(), Topic :: string(), Event :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 publish(Connection, Topic, Event) ->
 	iris_relay:publish(Connection, Topic, Event).
 
@@ -129,8 +143,11 @@ publish(Connection, Topic, Event) ->
 %% @spec (Connection, Topic) -> ok | {error, Reason}
 %%      Connection = connection()
 %%      Topic      = string()
-%%      Reason     = term()
+%%      Reason     = atom()
 %% @end
+-spec unsubscribe(Connection :: connection(), Topic :: string()) ->
+	ok | {error, Reason :: atom()}.
+
 unsubscribe(Connection, Topic) ->
 	iris_relay:unsubscribe(Connection, Topic).
 
@@ -145,8 +162,11 @@ unsubscribe(Connection, Topic) ->
 %%      App        = string()
 %%      Timeout    = pos_integer()
 %%      Tunnel     = tunnel()
-%%      Reason     = term()
+%%      Reason     = timeout | atom()
 %% @end
+-spec tunnel(Connection :: connection(), App :: string(), Timeout :: pos_integer()) ->
+	{ok, Tunnel :: tunnel()} | {error, Reason :: atom()}.
+
 tunnel(Connection, App, Timeout) ->
 	iris_relay:tunnel(Connection, App, Timeout).
 
@@ -157,24 +177,10 @@ tunnel(Connection, App, Timeout) ->
 %%
 %% @spec (Connection) -> ok | {error, Reason}
 %%      Connection = connection()
-%%      Reason     = term()
+%%      Reason     = atom()
 %% @end
+-spec close(Connection :: connection()) ->
+	ok | {error, Reason :: atom()}.
+
 close(Connection) ->
   iris_relay:close(Connection).
-
-%% =============================================================================
-%% Ugly dev hacks, run along, nothing to see here :))
-%% =============================================================================
-
-%% Reloads all iris related modules. Just a dev hack to make my life easier.
-%% @private
-reload() ->
-	Modules = [M || {M, P} <- code:all_loaded(), is_list(P) andalso string:str(P, "/work/iris") > 0],
-	lists:foreach(fun reload/1, Modules).
-
-%% Reloads a specific module. Just a dev hack to make my life easier.
-reload(Module) ->
-  code:purge(Module),
-  code:soft_purge(Module),
-  {module, Module} = code:load_file(Module),
-  ok.

@@ -23,34 +23,58 @@
 %% =============================================================================
 
 %% Starts the gen_server responsible for the relay connection.
+-spec connect(Port :: pos_integer(), App :: string()) ->
+	{ok, Connection :: iris:connection()} | {error, Reason :: atom()}.
+
 connect(Port, App) ->
 	gen_server:start(?MODULE, {Port, App, self()}, []).
 
 %% Forwards a broadcasted message for relaying.
+-spec broadcast(Connection :: iris:connection(), App :: string(), Message :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 broadcast(Connection, App, Message) ->
 	gen_server:call(Connection, {broadcast, App, Message}, infinity).
 
 %% Forwards the request to the relay. Timeouts are handled relay side.
+-spec request(Connection :: iris:connection(), App :: string(), Request :: binary(), Timeout :: pos_integer()) ->
+	{ok, Reply :: binary()} | {error, Reason :: atom()}.
+
 request(Connection, App, Request, Timeout) ->
 	gen_server:call(Connection, {request, App, Request, Timeout}, infinity).
 
 %% Forwards an async reply to the relay to be sent back to the caller.
+-spec reply(Sender :: iris:sender(), Reply :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 reply({Connection, RequestId}, Reply) ->
 	gen_server:call(Connection, {reply, RequestId, Reply}, infinity).
 
 %% Forwards the subscription request to the relay.
+-spec subscribe(Connection :: iris:connection(), Topic :: string()) ->
+	ok | {error, Reason :: atom()}.
+
 subscribe(Connection, Topic) ->
 	gen_server:call(Connection, {subscribe, Topic}, infinity).
 
 %% Publishes a message to the topic.
+-spec publish(Connection :: iris:connection(), Topic :: string(), Event :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 publish(Connection, Topic, Event) ->
 	gen_server:call(Connection, {publish, Topic, Event}, infinity).
 
 %% Forwards the subscription removal request to the relay.
+-spec unsubscribe(Connection :: iris:connection(), Topic :: string()) ->
+	ok | {error, Reason :: atom()}.
+
 unsubscribe(Connection, Topic) ->
 	gen_server:call(Connection, {unsubscribe, Topic}, infinity).
 
 %% Forwards a tunneling request to the relay.
+-spec tunnel(Connection :: iris:connection(), App :: string(), Timeout :: pos_integer()) ->
+	{ok, Tunnel :: iris:tunnel()} | {error, Reason :: atom()}.
+
 tunnel(Connection, App, Timeout) ->
 	gen_server:call(Connection, {tunnel, App, Timeout}, infinity).
 
@@ -67,6 +91,9 @@ tunnel_close(Connection, TunId) ->
 	gen_server:call(Connection, {tunnel_close, TunId}, infinity).
 
 %% Notifies the relay server of a gracefull close request.
+-spec close(Connection :: iris:connection()) ->
+	ok | {error, Reason :: atom()}.
+
 close(Connection) ->
 	gen_server:call(Connection, close, infinity).
 
