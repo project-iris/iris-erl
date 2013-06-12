@@ -394,10 +394,6 @@ process(Socket, Owner, Handler) ->
 		_InvalidOpcode     -> {error, violation}
 	end,
 	case Res of
-		ok ->
-			case process(Socket, Owner, Handler) of
-				ok -> ok;
-				{error, Reason} -> exit(Reason)
-			end;
+		ok              -> process(Socket, Owner, Handler);
 		{error, Reason} -> exit(Reason)
 	end.
