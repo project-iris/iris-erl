@@ -99,7 +99,7 @@ close(Connection) ->
 %% Connects to the locally running iris node and initiates the connection.
 init({Port, App, Handler}) ->
 	% Open the TCP connection
-	case gen_tcp:connect({127,0,0,1}, Port, [{active, false}, binary]) of
+	case gen_tcp:connect({127,0,0,1}, Port, [{active, false}, binary, {nodelay, true}]) of
 		{ok, Sock} ->
 			% Send the init packet
 			case iris_proto:sendInit(Sock, App) of
