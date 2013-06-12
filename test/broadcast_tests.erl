@@ -50,7 +50,7 @@ single_test() ->
 
 %% Starts a numbef of concurrent processes, each broadcasting to the whole pool.
 multi_test() ->
-	Servers = 25,
+	Servers = 100,
 	Broadcasts = 25,
 
 	% Start up the concurrent broadcasters
