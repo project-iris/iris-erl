@@ -28,16 +28,12 @@ single_test() ->
 	{ok, Server, _Link} = iris_server:start(?RELAY_PORT, "single", ?MODULE, self()),
 	receive
 		init -> ok
-	after
-		250 -> throw(init_timeout)
 	end,
 
 	% Terminate the server, checking success and terminate call
 	ok = iris_server:stop(Server),
 	receive
-		terminate -> ok
-	after
-		250 -> throw(term_timeout)
+		term -> ok
 	end.
 
 %% Starts a handful of concurrent Iris servers and checks startup and shutdown.
@@ -53,23 +49,17 @@ multi_test() ->
 			{ok, Server, _Link} = iris_server:start(?RELAY_PORT, "multi", ?MODULE, self()),
 			receive
 				init -> Parent ! {ok, self()}
-			after
-				250 -> throw(init_timeout)
 			end,
 
 			% Wait for permission to continue
 			receive
 				cont -> ok
-			after
-				250 -> throw(cont_timeout)
 			end,
 
 			% Terminate the server and signal parent
 			ok = iris_server:stop(Server),
 			receive
-				terminate -> Parent ! done
-			after
-				250 -> throw(term_timeout)
+				term -> Parent ! done
 			end
 		end)
 	end, lists:seq(1, Count)),
@@ -78,8 +68,6 @@ multi_test() ->
 	Pids = lists:map(fun(_) ->
 		receive
 			{ok, Pid} -> Pid
-		after
-			250 -> throw(start_timeout)
 		end
 	end, lists:seq(1, Count)),
 
@@ -90,8 +78,6 @@ multi_test() ->
 	lists:foreach(fun(_) ->
 		receive
 			done -> ok
-		after
-			250 -> throw(close_timeout)
 		end
 	end, lists:seq(1, Count)).
 
@@ -107,7 +93,7 @@ init(Parent) ->
 
 %% Notifies the tester of the successful terminate call.
 terminate(_Reason, {state, Parent}) ->
-	Parent ! terminate.
+	Parent ! term.
 
 
 %% =============================================================================
