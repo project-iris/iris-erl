@@ -32,13 +32,21 @@
 -define(OP_TUN_CLOSE, 16#0c). %% Tunnel closing
 
 %% Implemented relay protocol version.
+-spec version() -> [byte()].
+
 version() -> "v1.0".
 
 %% Serializes a single byte into the relay.
+-spec sendByte(Socket :: port(), Byte :: byte()) ->
+	ok | {error, Reason :: atom()}.
+
 sendByte(Socket, Byte) ->
 	gen_tcp:send(Socket, [Byte]).
 
 %% Serializes a variable int into the relay.
+-spec sendVarint(Socket :: port(), Num :: non_neg_integer()) ->
+	ok | {error, Reason :: atom()}.
+
 sendVarint(Socket, Num) when Num < 128 -> sendByte(Socket, Num);
 sendVarint(Socket, Num) ->
 	Rem = Num rem 128,
@@ -49,6 +57,9 @@ sendVarint(Socket, Num) ->
 	end.
 
 %% Serializes a length-tagged binary array into the relay.
+-spec sendBinary(Socket :: port(), Binary :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 sendBinary(Socket, Binary) ->
 	case sendVarint(Socket, byte_size(Binary)) of
 		ok    -> gen_tcp:send(Socket, Binary);
@@ -56,10 +67,16 @@ sendBinary(Socket, Binary) ->
 	end.
 
 %% Serializes a length-tagged string into the relay.
+-spec sendString(Socket :: port(), String :: string()) ->
+	ok | {error, Reason :: atom()}.
+
 sendString(Socket, String) ->
 	sendBinary(Socket, list_to_binary(String)).
 
 %% Assembles and serializes an init packet into the relay.
+-spec sendInit(Socket :: port(), App :: string()) ->
+	ok | {error, Reason :: atom()}.
+
 sendInit(Socket, App) ->
 	case sendByte(Socket, ?OP_INIT) of
 		ok ->
@@ -71,6 +88,9 @@ sendInit(Socket, App) ->
 	end.
 
 %% Assembles and serializes a broadcast packet into the relay.
+-spec sendBroadcast(Socket :: port(), App :: string(), Message :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 sendBroadcast(Socket, App, Message) ->
 	case sendByte(Socket, ?OP_BCAST) of
 		ok ->
@@ -82,6 +102,10 @@ sendBroadcast(Socket, App, Message) ->
 	end.
 
 %% Assembles and serializes a request packet into the relay.
+-spec sendRequest(Socket :: port(), ReqId :: non_neg_integer(), App :: string(),
+	Req :: binary(), Timeout :: pos_integer()) ->
+	ok | {error, Reason :: atom()}.
+
 sendRequest(Socket, ReqId, App, Req, Timeout) ->
 	case sendByte(Socket, ?OP_REQ) of
 		ok ->
@@ -101,6 +125,9 @@ sendRequest(Socket, ReqId, App, Req, Timeout) ->
 	end.
 
 %% Assembles and serializes a reply packet into the relay.
+-spec sendReply(Socket :: port(), ReqId :: non_neg_integer(), Reply :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 sendReply(Socket, ReqId, Reply) ->
 	case sendByte(Socket, ?OP_REP) of
 		ok ->
@@ -112,6 +139,9 @@ sendReply(Socket, ReqId, Reply) ->
 	end.
 
 %% Assembles and serializes a subscription packet into the relay.
+-spec sendSubscribe(Socket :: port(), Topic :: string()) ->
+	ok | {error, Reason :: atom()}.
+
 sendSubscribe(Socket, Topic) ->
 	case sendByte(Socket, ?OP_SUB) of
 		ok    -> sendString(Socket, Topic);
@@ -119,6 +149,9 @@ sendSubscribe(Socket, Topic) ->
 	end.
 
 %% Assembles and serializes a message to be published in a topic.
+-spec sendPublish(Socket :: port(), Topic :: string(), Message :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 sendPublish(Socket, Topic, Message) ->
 	case sendByte(Socket, ?OP_PUB) of
 		ok ->
@@ -130,6 +163,9 @@ sendPublish(Socket, Topic, Message) ->
 	end.
 
 %% Assembles and serializes a subscription removal packet into the relay.
+-spec sendUnsubscribe(Socket :: port(), Topic :: string()) ->
+	ok | {error, Reason :: atom()}.
+
 sendUnsubscribe(Socket, Topic) ->
 	case sendByte(Socket, ?OP_UNSUB) of
 		ok    -> sendString(Socket, Topic);
@@ -137,10 +173,17 @@ sendUnsubscribe(Socket, Topic) ->
 	end.
 
 %% Assembles and serializes a close packet into the relay.
+-spec sendClose(Socket :: port()) ->
+	ok | {error, Reason :: atom()}.
+
 sendClose(Socket) ->
 	sendByte(Socket, ?OP_CLOSE).
 
 %% Assembles and serializes a tunneling packet into the relay.
+-spec sendTunnelRequest(Socket :: port(), TunId :: non_neg_integer(), App :: string(),
+	Buffer :: pos_integer(), Timeout :: pos_integer()) ->
+	ok | {error, Reason :: atom()}.
+
 sendTunnelRequest(Socket, TunId, App, Buffer, Timeout) ->
 	case sendByte(Socket, ?OP_TUN_REQ) of
 		ok ->
@@ -160,6 +203,10 @@ sendTunnelRequest(Socket, TunId, App, Buffer, Timeout) ->
 	end.
 
 %% Assembles and serializes a tunneling confirmation packet into the relay.
+-spec sendTunnelReply(Socket :: port(), TmpId :: non_neg_integer(),
+	TunId :: non_neg_integer(), Buffer :: pos_integer()) ->
+	ok | {error, Reason :: atom()}.
+
 sendTunnelReply(Socket, TmpId, TunId, Buffer) ->
 	case sendByte(Socket, ?OP_TUN_REP) of
 		ok ->
@@ -175,6 +222,9 @@ sendTunnelReply(Socket, TmpId, TunId, Buffer) ->
 	end.
 
 %% Assembles and serializes a tunnel data packet into the relay.
+-spec sendTunnelData(Socket :: port(), TunId :: non_neg_integer(), Message :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 sendTunnelData(Socket, TunId, Message) ->
 	case sendByte(Socket, ?OP_TUN_DATA) of
 		ok ->
@@ -186,13 +236,19 @@ sendTunnelData(Socket, TunId, Message) ->
 	end.
 
 %% Assembles and serializes a tunnel data acknowledgement into the relay.
+-spec sendTunnelAck(Socket :: port(), TunId :: non_neg_integer()) ->
+	ok | {error, Reason :: atom()}.
+
 sendTunnelAck(Socket, TunId) ->
 	case sendByte(Socket, ?OP_TUN_ACK) of
 		ok    -> sendVarint(Socket, TunId);
 		Error -> Error
 	end.
 
-%% Assembles and serializes a tunnel termination message into the relay.
+%% Assembles and serializes a tunnel atomination message into the relay.
+-spec sendTunnelClose(Socket :: port(), TunId :: non_neg_integer()) ->
+	ok | {error, Reason :: atom()}.
+
 sendTunnelClose(Socket, TunId) ->
 	case sendByte(Socket, ?OP_TUN_CLOSE) of
 		ok    -> sendVarint(Socket, TunId);
@@ -200,6 +256,9 @@ sendTunnelClose(Socket, TunId) ->
 	end.
 
 %% Retrieves a single byte from the relay.
+-spec recvByte(Socket :: port()) ->
+	Input :: byte() | {error, Reason :: atom()}.
+
 recvByte(Socket) ->
 	case gen_tcp:recv(Socket, 1) of
 		{ok, <<Byte:8>>} -> Byte;
@@ -207,6 +266,9 @@ recvByte(Socket) ->
 	end.
 
 %% Retrieves a boolean from the relay.
+-spec recvBool(Socket :: port()) ->
+	Input :: boolean() | {error, Reason :: atom()}.
+
 recvBool(Socket) ->
 	case recvByte(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -216,6 +278,9 @@ recvBool(Socket) ->
 	end.
 
 %% Retrieves a variable int from the relay.
+-spec recvVarint(Socket :: port()) ->
+	Input :: non_neg_integer() | {error, Reason :: atom()}.
+
 recvVarint(Socket) ->
 	case recvByte(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -228,6 +293,9 @@ recvVarint(Socket) ->
 	end.
 
 %% Retrieves a length-tagged binary array from the relay.
+-spec recvBinary(Socket :: port()) ->
+	Input :: binary() | {error, Reason :: atom()}.
+
 recvBinary(Socket) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -239,6 +307,9 @@ recvBinary(Socket) ->
 	end.
 
 %% Retrieves a length-tagged binary array from the relay.
+-spec recvString(Socket :: port()) ->
+	Input :: [byte()] | {error, Reason :: atom()}.
+
 recvString(Socket) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -250,6 +321,9 @@ recvString(Socket) ->
 	end.
 
 %% Retrieves a connection initialization response and returns whether ok.
+-spec procInit(Socket :: port()) ->
+	ok | {error, Reason :: atom()}.
+
 procInit(Socket) ->
 	case recvByte(Socket) of
 		?OP_INIT                 -> ok;
@@ -258,6 +332,9 @@ procInit(Socket) ->
 	end.
 
 %% Retrieves a remote broadcast message from the relay and notifies the handler.
+-spec procBroadcast(Socket :: port(), Handler :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procBroadcast(Socket, Handler) ->
 	case recvBinary(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -267,6 +344,9 @@ procBroadcast(Socket, Handler) ->
 	end.
 
 %% Retrieves a remote request from the relay.
+-spec procRequest(Socket :: port(), Owner :: pid(), Handler :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procRequest(Socket, Owner, Handler) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -280,6 +360,9 @@ procRequest(Socket, Owner, Handler) ->
 	end.
 
 %% Retrieves a remote reply to a local request from the relay.
+-spec procReply(Socket :: port(), Owner :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procReply(Socket, Owner) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -300,6 +383,9 @@ procReply(Socket, Owner) ->
 	end.
 
 %% Retrieves a topic event from the relay.
+-spec procPublish(Socket :: port(), Handler :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procPublish(Socket, Handler) ->
 	case recvString(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -313,6 +399,9 @@ procPublish(Socket, Handler) ->
 	end.
 
 %% Retrieves a remote tunneling request from the relay.
+-spec procTunnelRequest(Socket :: port(), Owner :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procTunnelRequest(Socket, Owner) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -326,6 +415,9 @@ procTunnelRequest(Socket, Owner) ->
 	end.
 
 %% Retrieves the remote reply to a local tunneling request from the relay.
+-spec procTunnelReply(Socket :: port(), Owner :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procTunnelReply(Socket, Owner) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -346,6 +438,9 @@ procTunnelReply(Socket, Owner) ->
 	end.
 
 %% Retrieves a remote tunnel data message.
+-spec procTunnelData(Socket :: port(), Owner :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procTunnelData(Socket, Owner) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -359,6 +454,9 @@ procTunnelData(Socket, Owner) ->
 	end.
 
 %% Retrieves a remote tunnel message acknowledgement.
+-spec procTunnelAck(Socket :: port(), Owner :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procTunnelAck(Socket, Owner) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -368,6 +466,9 @@ procTunnelAck(Socket, Owner) ->
 	end.
 
 %% Retrieves the remote closure of a tunnel.
+-spec procTunnelClose(Socket :: port(), Owner :: pid()) ->
+	ok | {error, Reason :: atom()}.
+
 procTunnelClose(Socket, Owner) ->
 	case recvVarint(Socket) of
 		Error = {error, _Reason} -> Error;
@@ -378,6 +479,9 @@ procTunnelClose(Socket, Owner) ->
 
 %% Retrieves messages from the client connection and keeps processing them until
 %% either the relay closes (graceful close) or the connection drops.
+-spec process(Socket :: port(), Owner :: pid(), Handler :: pid()) ->
+	no_return() | {error, Reason :: atom()}.
+
 process(Socket, Owner, Handler) ->
 	Res = case recvByte(Socket) of
 		Error = {error, _} -> Error;
