@@ -7,6 +7,8 @@
 %%
 %% Author: peterke@gmail.com (Peter Szilagyi)
 
+%% @private
+
 -module(iris_tunnel).
 -export([buffer/0, send/3, recv/2, close/1]).
 
@@ -15,7 +17,6 @@
 	code_change/3]).
 
 %% Iris to app buffer size for flow control.
-%% @private
 -spec buffer() -> pos_integer().
 
 buffer() -> 128.
@@ -24,49 +25,22 @@ buffer() -> 128.
 %% External API functions
 %% =============================================================================
 
-%% @doc Sends a message over the tunnel to the remote pair, blocking until the
-%%      local relay node receives the message.
-%%
-%%      Infinite timeouts are supported either by specifying 'infinity' or 0 as
-%%      the timeout parameter.
-%%
-%% @spec (Tunnel, Message, Timeout) -> ok | {error, Reason}
-%%      Tunnel  = iris:tunnel()
-%%      Message = binary()
-%%      Timeout = timeout()
-%%      Reason  = atom()
-%% @end
--spec send(Tunnel :: iris:tunnel(), Message :: binary(), Timeout :: timeout()) ->
+%% Forwards the message to be sent to the tunnel process.
+-spec send(Tunnel :: pid(), Message :: binary(), Timeout :: timeout()) ->
 	ok | {error, Reason :: atom()}.
 
 send(Tunnel, Message, Timeout) ->
 	gen_server:call(Tunnel, {send, Message, Timeout}, infinity).
 
-%% @doc Retrieves a message from the tunnel, blocking until one is available.
-%%
-%%      Infinite timeouts are supported either by specifying 'infinity' or 0 as
-%%      the timeout parameter.
-%%
-%% @spec (Tunnel, Timeout) -> {ok, Message} | {error, Reason}
-%%      Tunnel  = iris:tunnel()
-%%      Timeout = timeout()
-%%      Message = binary()
-%%      Reason  = atom()
-%% @end
--spec recv(Tunnel :: iris:tunnel(), Timeout :: timeout()) ->
+%% Forwards the receive request to the tunnel process.
+-spec recv(Tunnel :: pid(), Timeout :: timeout()) ->
 	{ok, Message :: binary()} | {error, Reason :: atom()}.
 
 recv(Tunnel, Timeout) ->
 	gen_server:call(Tunnel, {recv, Timeout}, infinity).
 
-%% @doc Closes the tunnel between the pair. Any blocked read and write operation
-%%      will terminate with a failure.
-%%
-%% @spec (Tunnel) -> ok | {error, Reason}
-%%      Tunnel  = iris:tunnel()
-%%      Reason  = atom()
-%% @end
--spec close(Tunnel :: iris:tunnel()) ->
+%% Forwards the close request to the tunnel.
+-spec close(Tunnel :: pid()) ->
 	ok | {error, Reason :: atom()}.
 
 close(Tunnel) ->
@@ -96,7 +70,6 @@ close(Tunnel) ->
 %% =============================================================================
 
 %% Initializes the tunnel with the two asymmetric buffers.
-%% @private
 init({Relay, TunId, Buffer}) ->
 	{ok, #state{
 		tunid     = TunId,
@@ -110,13 +83,17 @@ init({Relay, TunId, Buffer}) ->
 
 %% Forwards an outbound message to the remote endpoint of the relay. If the send
 %% limit is reached, then the call is blocked and a coutdown timer started.
-%% @private
 handle_call({send, _Message, _Timeout}, _From, State = #state{term = true}) ->
 	{reply, {error, closed}, State};
 
 handle_call({send, Message, Timeout}, From, State = #state{atoiReady = 0, atoiTasks = Pend}) ->
 	Id = make_ref(),
-	{ok, TRef} = timer:send_after(Timeout, {timeout, send, Id}),
+	TRef = case Timeout of
+		infinity -> nil;
+		_Other ->
+			{ok, Ref} = timer:send_after(Timeout, {timeout, recv, Id}),
+			Ref
+	end,
 	Task = {Id, From, Message, TRef},
 	{noreply, State#state{atoiTasks = [Task | Pend]}};
 
@@ -131,7 +108,12 @@ handle_call({recv, _Timeout}, _From, State = #state{itoaReady = [], term = true}
 
 handle_call({recv, Timeout}, From, State = #state{itoaReady = [], itoaTasks = Pend}) ->
 	Id = make_ref(),
-	{ok, TRef} = timer:send_after(Timeout, {timeout, recv, Id}),
+	TRef = case Timeout of
+		infinity -> nil;
+		_Other ->
+			{ok, Ref} = timer:send_after(Timeout, {timeout, recv, Id}),
+			Ref
+	end,
 	Task = {Id, From, TRef},
 	{noreply, State#state{itoaTasks = [Task | Pend]}};
 
@@ -144,12 +126,14 @@ handle_call({recv, _Timeout}, _From, State = #state{itoaReady = [Msg | Rest]}) -
 %% Notifies the relay of the close request (which may or may not forward it to
 %% the Iris node), and terminates the process.
 handle_call(close, _From, State = #state{}) ->
-	Res = iris_relay:tunnel_close(State#state.relay, State#state.tunid),
+	Res = case State#state.term of
+		false -> iris_relay:tunnel_close(State#state.relay, State#state.tunid);
+		true  -> ok
+	end,
 	{stop, normal, Res, State}.
 
 %% Notifies the pending send of failure due to timeout. In the rare case of the
 %% timeout happening right before the timer is canceled, the event is dropped.
-%% @private
 handle_info({timeout, send, Id}, State = #state{atoiTasks = Pend}) ->
 	case lists:keyfind(Id, 1, Pend) of
 		false            -> ok;
@@ -173,7 +157,10 @@ handle_info({data, Message}, State = #state{itoaTasks = [], itoaReady = Ready}) 
 
 handle_info({data, Message}, State = #state{itoaTasks = [Task | Rest]}) ->
 	{_, From, TRef} = Task,
-	{ok, cancel} = timer:cancel(TRef),
+	case TRef of
+		nil    -> ok;
+		_Other ->	{ok, cancel} = timer:cancel(TRef)
+	end,
 	case iris_relay:tunnel_ack(State#state.relay, State#state.tunid) of
 		ok    -> gen_server:reply(From, {ok, Message});
 		Error -> gen_server:reply(From, Error)
@@ -187,7 +174,10 @@ handle_info(ack, State = #state{atoiTasks = [], atoiReady = Ready}) ->
 
 handle_info(ack, State = #state{atoiTasks = [Task | Rest]}) ->
 	{_, From, Message, TRef} = Task,
-	{ok, cancel} = timer:cancel(TRef),
+	case TRef of
+		nil    -> ok;
+		_Other ->	{ok, cancel} = timer:cancel(TRef)
+	end,
 	Res = iris_relay:tunnel_send(State#state.relay, State#state.tunid, Message),
 	gen_server:reply(From, Res),
 	{noreply, State#state{atoiTasks = Rest}};
@@ -196,10 +186,28 @@ handle_info(ack, State = #state{atoiTasks = [Task | Rest]}) ->
 %% data already received will be available for extraction before any error is
 %% returned.
 handle_info(close, State) ->
-	{noreply, State#state{term = true}}.
+	% Notify all pending receives of the closure
+	lists:foreach(fun({_, From, TRef}) ->
+		case TRef of
+			nil    -> ok;
+			_Other ->	{ok, cancel} = timer:cancel(TRef)
+		end,
+		gen_server:reply(From, {error, closed})
+	end, State#state.itoaTasks),
+
+	% Notify all pending sends of the closure
+	lists:foreach(fun({_, From, _Message, TRef}) ->
+		case TRef of
+			nil    -> ok;
+			_Other ->	{ok, cancel} = timer:cancel(TRef)
+		end,
+		gen_server:reply(From, {error, closed})
+	end, State#state.atoiTasks),
+
+	% Clean out the pending queue and set the term flag
+	{noreply, State#state{itoaTasks = [], term = true}}.
 
 %% Cleanup method, does nothing really.
-%% @private
 terminate(_Reason, _State) -> ok.
 
 
@@ -207,10 +215,8 @@ terminate(_Reason, _State) -> ok.
 %% Unused generic server methods
 %% =============================================================================
 
-%% @private
 code_change(_OldVsn, _State, _Extra) ->
 	{error, unimplemented}.
 
-%% @private
 handle_cast(_Request, State) ->
 	{stop, unimplemented, State}.

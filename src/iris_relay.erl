@@ -24,20 +24,20 @@
 
 %% Starts the gen_server responsible for the relay connection.
 -spec connect(Port :: pos_integer(), App :: string()) ->
-	{ok, Connection :: iris:connection()} | {error, Reason :: atom()}.
+	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
 connect(Port, App) ->
 	gen_server:start(?MODULE, {Port, lists:flatten(App), self()}, []).
 
 %% Forwards a broadcasted message for relaying.
--spec broadcast(Connection :: iris:connection(), App :: string(), Message :: binary()) ->
+-spec broadcast(Connection :: pid(), App :: string(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 broadcast(Connection, App, Message) ->
 	gen_server:call(Connection, {broadcast, lists:flatten(App), Message}, infinity).
 
 %% Forwards the request to the relay. Timeouts are handled relay side.
--spec request(Connection :: iris:connection(), App :: string(), Request :: binary(), Timeout :: pos_integer()) ->
+-spec request(Connection :: pid(), App :: string(), Request :: binary(), Timeout :: pos_integer()) ->
 	{ok, Reply :: binary()} | {error, Reason :: atom()}.
 
 request(Connection, App, Request, Timeout) ->
@@ -51,56 +51,56 @@ reply({Connection, RequestId}, Reply) ->
 	gen_server:call(Connection, {reply, RequestId, Reply}, infinity).
 
 %% Forwards the subscription request to the relay.
--spec subscribe(Connection :: iris:connection(), Topic :: string()) ->
+-spec subscribe(Connection :: pid(), Topic :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 subscribe(Connection, Topic) ->
 	gen_server:call(Connection, {subscribe, lists:flatten(Topic)}, infinity).
 
 %% Publishes a message to the topic.
--spec publish(Connection :: iris:connection(), Topic :: string(), Event :: binary()) ->
+-spec publish(Connection :: pid(), Topic :: string(), Event :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 publish(Connection, Topic, Event) ->
 	gen_server:call(Connection, {publish, lists:flatten(Topic), Event}, infinity).
 
 %% Forwards the subscription removal request to the relay.
--spec unsubscribe(Connection :: iris:connection(), Topic :: string()) ->
+-spec unsubscribe(Connection :: pid(), Topic :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 unsubscribe(Connection, Topic) ->
 	gen_server:call(Connection, {unsubscribe, lists:flatten(Topic)}, infinity).
 
 %% Forwards a tunneling request to the relay.
--spec tunnel(Connection :: iris:connection(), App :: string(), Timeout :: pos_integer()) ->
+-spec tunnel(Connection :: pid(), App :: string(), Timeout :: pos_integer()) ->
 	{ok, Tunnel :: iris:tunnel()} | {error, Reason :: atom()}.
 
 tunnel(Connection, App, Timeout) ->
 	gen_server:call(Connection, {tunnel, lists:flatten(App), Timeout}, infinity).
 
 %% Forwards a tunnel data packet to the relay. Flow control should be already handled!
--spec tunnel_send(Connection :: iris:connection(), TunId :: non_neg_integer(), Message :: binary()) ->
+-spec tunnel_send(Connection :: pid(), TunId :: non_neg_integer(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 tunnel_send(Connection, TunId, Message) ->
 	gen_server:call(Connection, {tunnel_send, TunId, Message}, infinity).
 
 %% Forwards a tunnel data acknowledgement to the relay.
--spec tunnel_ack(Connection :: iris:connection(), TunId :: non_neg_integer()) ->
+-spec tunnel_ack(Connection :: pid(), TunId :: non_neg_integer()) ->
 	ok | {error, Reason :: atom()}.
 
 tunnel_ack(Connection, TunId) ->
 	gen_server:call(Connection, {tunnel_ack, TunId}, infinity).
 
 %% Forwards a tunnel close request to the relay.
--spec tunnel_close(Connection :: iris:connection(), TunId :: non_neg_integer()) ->
+-spec tunnel_close(Connection :: pid(), TunId :: non_neg_integer()) ->
 	ok | {error, Reason :: atom()}.
 
 tunnel_close(Connection, TunId) ->
 	gen_server:call(Connection, {tunnel_close, TunId}, infinity).
 
 %% Notifies the relay server of a gracefull close request.
--spec close(Connection :: iris:connection()) ->
+-spec close(Connection :: pid()) ->
 	ok | {error, Reason :: atom()}.
 
 close(Connection) ->
@@ -275,7 +275,7 @@ handle_info({tunnel_request, TmpId, Buffer}, State = #state{sock = Sock}) ->
 	ok = iris_proto:sendTunnelReply(Sock, TmpId, TunId, iris_tunnel:buffer()),
 
 	% Notify the handler of the new tunnel
-	State#state.handler ! {tunnel, Tunnel},
+	State#state.handler ! {tunnel, {tunnel, Tunnel}},
 	{noreply, State#state{tunIdx = TunId+1}};
 
 % Delivers a reply to a pending tunneling request.
@@ -291,7 +291,7 @@ handle_info({tunnel_reply, TunId, Reply}, State) ->
 				{ok, Tunnel} ->
 					% Save the live tunnel
 					true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
-					{ok, Tunnel};
+					{ok, {tunnel, Tunnel}};
 				Error -> Error
 			end;
 		Error -> Error
@@ -326,6 +326,11 @@ handle_info({'EXIT', _Pid, Reason}, State) ->
 	lists:foreach(fun({_ReqId, Pid}) ->
 		gen_server:reply(Pid, {error, terminating})
 	end, ets:tab2list(State#state.reqPend)),
+
+	% Notify all tunnels of the closure
+	lists:foreach(fun({_, Tunnel}) ->
+		Tunnel ! close
+	end, ets:tab2list(State#state.tunLive)),
 
 	% Terminate, notifying either the closer or the handler
 	case State#state.closer of

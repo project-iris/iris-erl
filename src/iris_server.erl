@@ -7,8 +7,39 @@
 %%
 %% Author: peterke@gmail.com (Peter Szilagyi)
 
-%% @doc
-%% A behavior module for implementing
+%% @doc A behavior module for implementing an Iris server event handler. The
+%%      behavior follows the exact same design principles as the OTP gen_server.
+%%
+%%      It is assumed that all handler specific parts are located in a callback
+%%      module, which implements and exports a set of pre-defined functions. The
+%%      relationship between the Iris API and the callback functions is as
+%%      follows:
+%%
+%%      ```
+%%      iris_server module          callback module
+%%      ----------------------      --------------------
+%%      iris_server:start
+%%      iris_server:start_link ---> Module:init/1
+%%      iris_server:stop       ---> Module:terminate/2
+%%      ---                    ---> Module:handle_drop/2
+%%
+%%      iris module                 callback module
+%%      --------------              -------------------------
+%%      iris:broadcast         ---> Module:handle_broadcast/3
+%%      iris:request           ---> Module:handle_request/4
+%%      iris:publish           ---> Module:handle_publish/4
+%%      iris:tunnel            ---> Module:handle_tunnel/3
+%%      '''
+%%
+%%      If a callback function fails or returns a bad value, the iris_server
+%%      will terminate. Unless otherwise stated, all functions in this module
+%%      fail if the specified gen_server does not exist or if bad arguments are
+%%      given.
+%%
+%%      A slight difference to the gen_server behavior is that the event trigger
+%%      methods have not been duplicated in the iris_server module too, rather
+%%      they use the methods defined in the {@link iris} module, as depicted in
+%%      the above table.
 %% @end
 
 -module(iris_server).
@@ -108,8 +139,8 @@ start_link(Port, App, Module, Args) ->
 -spec stop(Server :: pid()) ->
 	ok | {error, Reason :: atom()}.
 
-stop(ServerRef) ->
-	gen_server:call(ServerRef, stop).
+stop(Server) ->
+	gen_server:call(Server, stop).
 
 
 %% =============================================================================
