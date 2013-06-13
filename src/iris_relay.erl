@@ -78,15 +78,24 @@ unsubscribe(Connection, Topic) ->
 tunnel(Connection, App, Timeout) ->
 	gen_server:call(Connection, {tunnel, App, Timeout}, infinity).
 
-%% Forwards a tunnel data packet to the relay.
+%% Forwards a tunnel data packet to the relay. Flow control should be already handled!
+-spec tunnel_send(Connection :: iris:connection(), TunId :: non_neg_integer(), Message :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
 tunnel_send(Connection, TunId, Message) ->
 	gen_server:call(Connection, {tunnel_send, TunId, Message}, infinity).
 
 %% Forwards a tunnel data acknowledgement to the relay.
+-spec tunnel_ack(Connection :: iris:connection(), TunId :: non_neg_integer()) ->
+	ok | {error, Reason :: atom()}.
+
 tunnel_ack(Connection, TunId) ->
 	gen_server:call(Connection, {tunnel_ack, TunId}, infinity).
 
 %% Forwards a tunnel close request to the relay.
+-spec tunnel_close(Connection :: iris:connection(), TunId :: non_neg_integer()) ->
+	ok | {error, Reason :: atom()}.
+
 tunnel_close(Connection, TunId) ->
 	gen_server:call(Connection, {tunnel_close, TunId}, infinity).
 

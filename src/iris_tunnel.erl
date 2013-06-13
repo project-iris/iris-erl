@@ -16,6 +16,8 @@
 
 %% Iris to app buffer size for flow control.
 %% @private
+-spec buffer() -> pos_integer().
+
 buffer() -> 128.
 
 %% =============================================================================
@@ -25,23 +27,35 @@ buffer() -> 128.
 %% @doc Sends a message over the tunnel to the remote pair, blocking until the
 %%      local relay node receives the message.
 %%
+%%      Infinite timeouts are supported either by specifying 'infinity' or 0 as
+%%      the timeout parameter.
+%%
 %% @spec (Tunnel, Message, Timeout) -> ok | {error, Reason}
-%%      Tunnel  = pid()
+%%      Tunnel  = iris:tunnel()
 %%      Message = binary()
-%%      Timeout = int()
-%%      Reason  = term()
+%%      Timeout = timeout()
+%%      Reason  = atom()
 %% @end
+-spec send(Tunnel :: iris:tunnel(), Message :: binary(), Timeout :: timeout()) ->
+	ok | {error, Reason :: atom()}.
+
 send(Tunnel, Message, Timeout) ->
 	gen_server:call(Tunnel, {send, Message, Timeout}, infinity).
 
 %% @doc Retrieves a message from the tunnel, blocking until one is available.
 %%
+%%      Infinite timeouts are supported either by specifying 'infinity' or 0 as
+%%      the timeout parameter.
+%%
 %% @spec (Tunnel, Timeout) -> {ok, Message} | {error, Reason}
-%%      Tunnel  = pid()
-%%      Timeout = int()
+%%      Tunnel  = iris:tunnel()
+%%      Timeout = timeout()
 %%      Message = binary()
-%%      Reason  = term()
+%%      Reason  = atom()
 %% @end
+-spec recv(Tunnel :: iris:tunnel(), Timeout :: timeout()) ->
+	{ok, Message :: binary()} | {error, Reason :: atom()}.
+
 recv(Tunnel, Timeout) ->
 	gen_server:call(Tunnel, {recv, Timeout}, infinity).
 
@@ -49,9 +63,12 @@ recv(Tunnel, Timeout) ->
 %%      will terminate with a failure.
 %%
 %% @spec (Tunnel) -> ok | {error, Reason}
-%%      Tunnel  = pid()
-%%      Reason  = term()
+%%      Tunnel  = iris:tunnel()
+%%      Reason  = atom()
 %% @end
+-spec close(Tunnel :: iris:tunnel()) ->
+	ok | {error, Reason :: atom()}.
+
 close(Tunnel) ->
 	gen_server:call(Tunnel, close, infinity).
 

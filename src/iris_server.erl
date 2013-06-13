@@ -49,6 +49,23 @@
 %% External API functions
 %% =============================================================================
 
+%% @doc Creates and starts an Iris server process.
+%%
+%%      The server will connect to the locally running Iris relay, and receive
+%%      all the inbound network events, conforming to the iris_server behavior.
+%%
+%% @spec (Port, App, Module, Args) -> {ok, Server, Connection} | {error, Reason}
+%%      Port       = pos_integer()
+%%      App        = string()
+%%      Module     = atom()
+%%      Args       = term()
+%%      Server     = pid()
+%%      Connection = connection()
+%%      Reason     = atom()
+%% @end
+-spec start(Port :: pos_integer(), App :: string(), Module :: atom(), Args :: term()) ->
+	{ok, Server :: pid(), Connection :: iris:connection()} | {error, Reason :: atom()}.
+
 start(Port, App, Module, Args) ->
 	case gen_server:start(?MODULE, {Port, App, Module, Args}, []) of
 		{ok, Pid} ->
@@ -57,6 +74,23 @@ start(Port, App, Module, Args) ->
 		Other -> Other
 	end.
 
+%% @doc Creates and starts an Iris server process, linked to the caller.
+%%
+%%      The server will connect to the locally running Iris relay, and receive
+%%      all the inbound network events, conforming to the iris_server behavior.
+%%
+%% @spec (Port, App, Module, Args) -> {ok, Server, Connection} | {error, Reason}
+%%      Port       = pos_integer()
+%%      App        = string()
+%%      Module     = atom()
+%%      Args       = term()
+%%      Server     = pid()
+%%      Connection = connection()
+%%      Reason     = atom()
+%% @end
+-spec start_link(Port :: pos_integer(), App :: string(), Module :: atom(), Args :: term()) ->
+	{ok, Server :: pid(), Connection :: iris:connection()} | {error, Reason :: atom()}.
+
 start_link(Port, App, Module, Args) ->
 	case gen_server:start_link(?MODULE, {Port, App, Module, Args}, []) of
 		{ok, Pid} ->
@@ -64,6 +98,15 @@ start_link(Port, App, Module, Args) ->
 			{ok, Pid, Link};
 		Other -> Other
 	end.
+
+%% @doc Gracefully terminates the server process.
+%%
+%% @spec (Server) -> ok | {error, Reason}
+%%      Server     = pid()
+%%      Reason     = atom()
+%% @end
+-spec stop(Server :: pid()) ->
+	ok | {error, Reason :: atom()}.
 
 stop(ServerRef) ->
 	gen_server:call(ServerRef, stop).
