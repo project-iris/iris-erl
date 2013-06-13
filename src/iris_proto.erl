@@ -36,70 +36,40 @@
 
 version() -> "v1.0".
 
-%% Serializes a single byte into the relay.
--spec sendByte(Socket :: port(), Byte :: byte()) ->
-	ok | {error, Reason :: atom()}.
+%% Serializes a variable int into an iolist.
+-spec packVarint(Num :: non_neg_integer()) ->
+	Stream :: iolist().
 
-sendByte(Socket, Byte) ->
-	gen_tcp:send(Socket, [Byte]).
+packVarint(Num) when Num < 128 -> Num;
+packVarint(Num)                -> [128 + Num rem 128, packVarint(Num div 128)].
 
-%% Serializes a variable int into the relay.
--spec sendVarint(Socket :: port(), Num :: non_neg_integer()) ->
-	ok | {error, Reason :: atom()}.
+%% Serializes a length-tagged binary array into an iolist.
+-spec packBinary(Binary :: binary()) ->
+	Stream :: iolist().
 
-sendVarint(Socket, Num) when Num < 128 -> sendByte(Socket, Num);
-sendVarint(Socket, Num) ->
-	Rem = Num rem 128,
-	Res = Num div 128,
-	case sendByte(Socket, 128 + Rem) of
-		ok    -> sendVarint(Socket, Res);
-		Error -> Error
-	end.
-
-%% Serializes a length-tagged binary array into the relay.
--spec sendBinary(Socket :: port(), Binary :: binary()) ->
-	ok | {error, Reason :: atom()}.
-
-sendBinary(Socket, Binary) ->
-	case sendVarint(Socket, byte_size(Binary)) of
-		ok    -> gen_tcp:send(Socket, Binary);
-		Error -> Error
-	end.
+packBinary(Binary) ->
+	[packVarint(byte_size(Binary)), Binary].
 
 %% Serializes a length-tagged string into the relay.
--spec sendString(Socket :: port(), String :: string()) ->
-	ok | {error, Reason :: atom()}.
+-spec packString(String :: string()) ->
+	Stream :: iolist().
 
-sendString(Socket, String) ->
-	sendBinary(Socket, list_to_binary(String)).
+packString(String) ->
+	packBinary(list_to_binary(String)).
 
 %% Assembles and serializes an init packet into the relay.
 -spec sendInit(Socket :: port(), App :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 sendInit(Socket, App) ->
-	case sendByte(Socket, ?OP_INIT) of
-		ok ->
-			case sendString(Socket, version()) of
-				ok    -> sendString(Socket, App);
-				Error -> Error
-			end;
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_INIT, packString(version()), packString(App)]).
 
 %% Assembles and serializes a broadcast packet into the relay.
 -spec sendBroadcast(Socket :: port(), App :: string(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 sendBroadcast(Socket, App, Message) ->
-	case sendByte(Socket, ?OP_BCAST) of
-		ok ->
-			case sendString(Socket, App) of
-				ok    -> sendBinary(Socket, Message);
-				Error -> Error
-			end;
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_BCAST, packString(App), packBinary(Message)]).
 
 %% Assembles and serializes a request packet into the relay.
 -spec sendRequest(Socket :: port(), ReqId :: non_neg_integer(), App :: string(),
@@ -107,77 +77,42 @@ sendBroadcast(Socket, App, Message) ->
 	ok | {error, Reason :: atom()}.
 
 sendRequest(Socket, ReqId, App, Req, Timeout) ->
-	case sendByte(Socket, ?OP_REQ) of
-		ok ->
-			case sendVarint(Socket, ReqId) of
-				ok ->
-					case sendString(Socket, App) of
-						ok ->
-							case sendBinary(Socket, Req) of
-								ok    -> sendVarint(Socket, Timeout);
-								Error -> Error
-							end;
-						Error -> Error
-					end;
-				Error -> Error
-			end;
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_REQ, packVarint(ReqId), packString(App), packBinary(Req), packVarint(Timeout)]).
 
 %% Assembles and serializes a reply packet into the relay.
 -spec sendReply(Socket :: port(), ReqId :: non_neg_integer(), Reply :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 sendReply(Socket, ReqId, Reply) ->
-	case sendByte(Socket, ?OP_REP) of
-		ok ->
-			case sendVarint(Socket, ReqId) of
-				ok    -> sendBinary(Socket, Reply);
-				Error -> Error
-			end;
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_REP, packVarint(ReqId),	packBinary(Reply)]).
 
 %% Assembles and serializes a subscription packet into the relay.
 -spec sendSubscribe(Socket :: port(), Topic :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 sendSubscribe(Socket, Topic) ->
-	case sendByte(Socket, ?OP_SUB) of
-		ok    -> sendString(Socket, Topic);
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_SUB, packString(Topic)]).
 
 %% Assembles and serializes a message to be published in a topic.
 -spec sendPublish(Socket :: port(), Topic :: string(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 sendPublish(Socket, Topic, Message) ->
-	case sendByte(Socket, ?OP_PUB) of
-		ok ->
-			case sendString(Socket, Topic) of
-				ok    -> sendBinary(Socket, Message);
-				Error -> Error
-			end;
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_PUB, packString(Topic), packBinary(Message)]).
 
 %% Assembles and serializes a subscription removal packet into the relay.
 -spec sendUnsubscribe(Socket :: port(), Topic :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 sendUnsubscribe(Socket, Topic) ->
-	case sendByte(Socket, ?OP_UNSUB) of
-		ok    -> sendString(Socket, Topic);
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_UNSUB, packString(Topic)]).
 
 %% Assembles and serializes a close packet into the relay.
 -spec sendClose(Socket :: port()) ->
 	ok | {error, Reason :: atom()}.
 
 sendClose(Socket) ->
-	sendByte(Socket, ?OP_CLOSE).
+	gen_tcp:send(Socket, [?OP_CLOSE]).
 
 %% Assembles and serializes a tunneling packet into the relay.
 -spec sendTunnelRequest(Socket :: port(), TunId :: non_neg_integer(), App :: string(),
@@ -185,22 +120,7 @@ sendClose(Socket) ->
 	ok | {error, Reason :: atom()}.
 
 sendTunnelRequest(Socket, TunId, App, Buffer, Timeout) ->
-	case sendByte(Socket, ?OP_TUN_REQ) of
-		ok ->
-			case sendVarint(Socket, TunId) of
-				ok ->
-					case sendString(Socket, App) of
-						ok ->
-							case sendVarint(Socket, Buffer) of
-								ok    -> sendVarint(Socket, Timeout);
-								Error -> Error
-							end;
-						Error -> Error
-					end;
-				Error -> Error
-			end;
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_TUN_REQ, packVarint(TunId), packString(App), packVarint(Buffer), packVarint(Timeout)]).
 
 %% Assembles and serializes a tunneling confirmation packet into the relay.
 -spec sendTunnelReply(Socket :: port(), TmpId :: non_neg_integer(),
@@ -208,52 +128,28 @@ sendTunnelRequest(Socket, TunId, App, Buffer, Timeout) ->
 	ok | {error, Reason :: atom()}.
 
 sendTunnelReply(Socket, TmpId, TunId, Buffer) ->
-	case sendByte(Socket, ?OP_TUN_REP) of
-		ok ->
-			case sendVarint(Socket, TmpId) of
-				ok ->
-					case sendVarint(Socket, TunId) of
-						ok    -> sendVarint(Socket, Buffer);
-						Error -> Error
-					end;
-				Error -> Error
-			end;
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_TUN_REP, packVarint(TmpId), packVarint(TunId), packVarint(Buffer)]).
 
 %% Assembles and serializes a tunnel data packet into the relay.
 -spec sendTunnelData(Socket :: port(), TunId :: non_neg_integer(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 sendTunnelData(Socket, TunId, Message) ->
-	case sendByte(Socket, ?OP_TUN_DATA) of
-		ok ->
-			case sendVarint(Socket, TunId) of
-				ok    -> sendBinary(Socket, Message);
-				Error -> Error
-			end;
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_TUN_DATA, packVarint(TunId), packBinary(Message)]).
 
 %% Assembles and serializes a tunnel data acknowledgement into the relay.
 -spec sendTunnelAck(Socket :: port(), TunId :: non_neg_integer()) ->
 	ok | {error, Reason :: atom()}.
 
 sendTunnelAck(Socket, TunId) ->
-	case sendByte(Socket, ?OP_TUN_ACK) of
-		ok    -> sendVarint(Socket, TunId);
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_TUN_ACK, packVarint(TunId)]).
 
 %% Assembles and serializes a tunnel atomination message into the relay.
 -spec sendTunnelClose(Socket :: port(), TunId :: non_neg_integer()) ->
 	ok | {error, Reason :: atom()}.
 
 sendTunnelClose(Socket, TunId) ->
-	case sendByte(Socket, ?OP_TUN_CLOSE) of
-		ok    -> sendVarint(Socket, TunId);
-		Error -> Error
-	end.
+	gen_tcp:send(Socket, [?OP_TUN_CLOSE, packVarint(TunId)]).
 
 %% Retrieves a single byte from the relay.
 -spec recvByte(Socket :: port()) ->
