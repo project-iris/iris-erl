@@ -31,8 +31,7 @@ single_test() ->
 	Count = 1000,
 	lists:foreach(fun(_) ->
 		Req = crypto:strong_rand_bytes(128),
-		{Time, {ok, Req}} = timer:tc(fun() -> iris:request(Link, "single", Req, 250) end),
-		io:format(user, "Req time: ~pus~n", [Time])
+		{ok, Req} = iris:request(Link, "single", Req, 250)
 	end, lists:seq(1, Count)),
 
 	% Close the Iris connection
