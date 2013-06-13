@@ -1,0 +1,21 @@
+@copyright 2013 Peter Szilagyi. All rights reserved.
+
+@doc This is the official Erlang language binding for the Iris decentralized messaging framework.
+
+== Iris Background ==
+
+<ul>
+	<li>For a quick overview of Iris, please see the Iris teaser presentation: [http://iris.karalabe.com/talks/teaser.slide],</li>
+	<li>for further information and other language bindings check the Iris website: [http://iris.karalabe.com]</li>
+	<li>and lastly for source codes check the Iris github projects: [http://github.com/karalabe].</li>
+</ul>
+
+== Erlang Binding ==
+
+The Erlang binding provides two layers of APIs for interfacing the Iris network:
+<ul>
+  <li>A lower level API which uses direct message passing for receiving network messages: {@link iris}</li>
+  <li>A higher level API which follows the design principles and concepts behind the OTP gen_server: {@link iris} and {@link iris_server}</li>
+</ul>
+
+@end
