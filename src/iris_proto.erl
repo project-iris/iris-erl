@@ -51,28 +51,28 @@ packBinary(Binary) ->
 	[packVarint(byte_size(Binary)), Binary].
 
 %% Serializes a length-tagged string into the relay.
--spec packString(String :: string()) ->
+-spec packString(String :: [byte()]) ->
 	Stream :: iolist().
 
 packString(String) ->
 	packBinary(list_to_binary(String)).
 
 %% Assembles and serializes an init packet into the relay.
--spec sendInit(Socket :: port(), App :: string()) ->
+-spec sendInit(Socket :: port(), App :: [byte()]) ->
 	ok | {error, Reason :: atom()}.
 
 sendInit(Socket, App) ->
 	gen_tcp:send(Socket, [?OP_INIT, packString(version()), packString(App)]).
 
 %% Assembles and serializes a broadcast packet into the relay.
--spec sendBroadcast(Socket :: port(), App :: string(), Message :: binary()) ->
+-spec sendBroadcast(Socket :: port(), App :: [byte()], Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 sendBroadcast(Socket, App, Message) ->
 	gen_tcp:send(Socket, [?OP_BCAST, packString(App), packBinary(Message)]).
 
 %% Assembles and serializes a request packet into the relay.
--spec sendRequest(Socket :: port(), ReqId :: non_neg_integer(), App :: string(),
+-spec sendRequest(Socket :: port(), ReqId :: non_neg_integer(), App :: [byte()],
 	Req :: binary(), Timeout :: pos_integer()) ->
 	ok | {error, Reason :: atom()}.
 
@@ -87,21 +87,21 @@ sendReply(Socket, ReqId, Reply) ->
 	gen_tcp:send(Socket, [?OP_REP, packVarint(ReqId),	packBinary(Reply)]).
 
 %% Assembles and serializes a subscription packet into the relay.
--spec sendSubscribe(Socket :: port(), Topic :: string()) ->
+-spec sendSubscribe(Socket :: port(), Topic :: [byte()]) ->
 	ok | {error, Reason :: atom()}.
 
 sendSubscribe(Socket, Topic) ->
 	gen_tcp:send(Socket, [?OP_SUB, packString(Topic)]).
 
 %% Assembles and serializes a message to be published in a topic.
--spec sendPublish(Socket :: port(), Topic :: string(), Message :: binary()) ->
+-spec sendPublish(Socket :: port(), Topic :: [byte()], Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 sendPublish(Socket, Topic, Message) ->
 	gen_tcp:send(Socket, [?OP_PUB, packString(Topic), packBinary(Message)]).
 
 %% Assembles and serializes a subscription removal packet into the relay.
--spec sendUnsubscribe(Socket :: port(), Topic :: string()) ->
+-spec sendUnsubscribe(Socket :: port(), Topic :: [byte()]) ->
 	ok | {error, Reason :: atom()}.
 
 sendUnsubscribe(Socket, Topic) ->
@@ -115,7 +115,7 @@ sendClose(Socket) ->
 	gen_tcp:send(Socket, [?OP_CLOSE]).
 
 %% Assembles and serializes a tunneling packet into the relay.
--spec sendTunnelRequest(Socket :: port(), TunId :: non_neg_integer(), App :: string(),
+-spec sendTunnelRequest(Socket :: port(), TunId :: non_neg_integer(), App :: [byte()],
 	Buffer :: pos_integer(), Timeout :: pos_integer()) ->
 	ok | {error, Reason :: atom()}.
 
@@ -279,17 +279,17 @@ procReply(Socket, Owner) ->
 	end.
 
 %% Retrieves a topic event from the relay.
--spec procPublish(Socket :: port(), Handler :: pid()) ->
+-spec procPublish(Socket :: port(), Owner :: pid()) ->
 	ok | {error, Reason :: atom()}.
 
-procPublish(Socket, Handler) ->
+procPublish(Socket, Owner) ->
 	case recvString(Socket) of
 		Error = {error, _Reason} -> Error;
 		Topic ->
 			case recvBinary(Socket) of
 				Error = {error, _Reason} -> Error;
-				Msg ->
-					Handler ! {publish, Topic, Msg},
+				Event ->
+					Owner ! {publish, Topic, Event},
 					ok
 			end
 	end.
@@ -384,7 +384,7 @@ process(Socket, Owner, Handler) ->
 		?OP_BCAST          -> procBroadcast(Socket, Handler);
 		?OP_REQ            -> procRequest(Socket, Owner, Handler);
 		?OP_REP            -> procReply(Socket, Owner);
-		?OP_PUB            -> procPublish(Socket, Handler);
+		?OP_PUB            -> procPublish(Socket, Owner);
 		?OP_TUN_REQ        -> procTunnelRequest(Socket, Owner);
 		?OP_TUN_REP        -> procTunnelReply(Socket, Owner);
 		?OP_TUN_DATA       -> procTunnelData(Socket, Owner);

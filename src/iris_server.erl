@@ -32,7 +32,7 @@
 	{reply, Reply :: binary(), NewState :: term()} | {noreply, NewState :: term()} |
 	{stop, Reply :: binary(), Reason :: term(), NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
--callback handle_publish(Event :: binary(), Topic :: string(), State :: term(), Link :: iris:connection()) ->
+-callback handle_publish(Topic :: string(), Event :: binary(), State :: term(), Link :: iris:connection()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
 -callback handle_tunnel(Tunnel :: iris:tunnel(), State :: term(), Link :: iris:connection()) ->

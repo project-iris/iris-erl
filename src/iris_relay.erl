@@ -27,21 +27,21 @@
 	{ok, Connection :: iris:connection()} | {error, Reason :: atom()}.
 
 connect(Port, App) ->
-	gen_server:start(?MODULE, {Port, App, self()}, []).
+	gen_server:start(?MODULE, {Port, lists:flatten(App), self()}, []).
 
 %% Forwards a broadcasted message for relaying.
 -spec broadcast(Connection :: iris:connection(), App :: string(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 broadcast(Connection, App, Message) ->
-	gen_server:call(Connection, {broadcast, App, Message}, infinity).
+	gen_server:call(Connection, {broadcast, lists:flatten(App), Message}, infinity).
 
 %% Forwards the request to the relay. Timeouts are handled relay side.
 -spec request(Connection :: iris:connection(), App :: string(), Request :: binary(), Timeout :: pos_integer()) ->
 	{ok, Reply :: binary()} | {error, Reason :: atom()}.
 
 request(Connection, App, Request, Timeout) ->
-	gen_server:call(Connection, {request, App, Request, Timeout}, infinity).
+	gen_server:call(Connection, {request, lists:flatten(App), Request, Timeout}, infinity).
 
 %% Forwards an async reply to the relay to be sent back to the caller.
 -spec reply(Sender :: iris:sender(), Reply :: binary()) ->
@@ -55,28 +55,28 @@ reply({Connection, RequestId}, Reply) ->
 	ok | {error, Reason :: atom()}.
 
 subscribe(Connection, Topic) ->
-	gen_server:call(Connection, {subscribe, Topic}, infinity).
+	gen_server:call(Connection, {subscribe, lists:flatten(Topic)}, infinity).
 
 %% Publishes a message to the topic.
 -spec publish(Connection :: iris:connection(), Topic :: string(), Event :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 publish(Connection, Topic, Event) ->
-	gen_server:call(Connection, {publish, Topic, Event}, infinity).
+	gen_server:call(Connection, {publish, lists:flatten(Topic), Event}, infinity).
 
 %% Forwards the subscription removal request to the relay.
 -spec unsubscribe(Connection :: iris:connection(), Topic :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 unsubscribe(Connection, Topic) ->
-	gen_server:call(Connection, {unsubscribe, Topic}, infinity).
+	gen_server:call(Connection, {unsubscribe, lists:flatten(Topic)}, infinity).
 
 %% Forwards a tunneling request to the relay.
 -spec tunnel(Connection :: iris:connection(), App :: string(), Timeout :: pos_integer()) ->
 	{ok, Tunnel :: iris:tunnel()} | {error, Reason :: atom()}.
 
 tunnel(Connection, App, Timeout) ->
-	gen_server:call(Connection, {tunnel, App, Timeout}, infinity).
+	gen_server:call(Connection, {tunnel, lists:flatten(App), Timeout}, infinity).
 
 %% Forwards a tunnel data packet to the relay. Flow control should be already handled!
 -spec tunnel_send(Connection :: iris:connection(), TunId :: non_neg_integer(), Message :: binary()) ->
@@ -251,6 +251,15 @@ handle_info({reply, ReqId, Reply}, State) ->
 
 	% Reply to the pending process and return
 	gen_server:reply(Pending, Reply),
+	{noreply, State};
+
+%% Delivers a published event if the subscription is still alive.
+handle_info({publish, Topic, Event}, State) ->
+	% Make sure the subscription existed in the first hand
+	case ets:member(State#state.subLive, Topic) of
+		true  -> State#state.handler ! {publish, Topic, Event};
+		false -> ok
+	end,
 	{noreply, State};
 
 %% Accepts an incoming tunneling request from a remote app, assembling a local
