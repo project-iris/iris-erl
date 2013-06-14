@@ -237,11 +237,12 @@ recv({tunnel, Tunnel}, Timeout) ->
 
 %% @doc Gracefully terminates an Iris entity.
 %%
-%%      If the entity is a connection, all subscriptions are removed and all
-%%      open tunnels are closed, after which teh relay link is severed.
-%%
-%%      If the entity is a tunnel, all pending operations are notified and the
-%%      tunnel closed.
+%%      <ul>
+%%        <li>If `Entity' is a connection, all subscriptions are removed and all
+%%            open tunnels are closed, after which the relay link is severed.</li>
+%%        <li>If `Entity' is a tunnel, all pending operations are notified and
+%%            the tunnel closed.</li>
+%%      </ul>
 %%
 %%      The call blocks until the operation finishes or fails.
 %%
