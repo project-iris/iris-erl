@@ -39,8 +39,8 @@ single_test() ->
 
 % Starts a handful of concurrent servers which send requests to each other.
 multi_test() ->
-	Servers = 100,
-	Requests = 100,
+	Servers = 75,
+	Requests = 75,
 
 	% Start up the concurrent requesters (and repliers)
 	lists:foreach(fun(_) ->

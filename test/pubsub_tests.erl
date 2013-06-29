@@ -24,8 +24,8 @@
 
 % Subscribes to a handfull of topics, and publishes to each a batch of messages.
 single_test() ->
-	Events = 100,
-	Topics = 100,
+	Events = 75,
+	Topics = 75,
 	Names = lists:map(fun(_) ->
 		base64:encode_to_string(crypto:strong_rand_bytes(64))
 	end, lists:seq(1, Topics)),
@@ -115,6 +115,9 @@ multi_test() ->
 			{ok, Pid} -> Pid
 		end
 	end, lists:seq(1, Servers)),
+
+	% Sleep a bit to ensure subscriptions succeeded
+	timer:sleep(10),
 
 	% Permit all servers to begin broadcast
 	lists:foreach(fun(Pid) -> Pid ! cont end, Pids),

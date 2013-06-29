@@ -66,16 +66,16 @@ multi_test() ->
 			end,
 
 			% Open a tunnel to somebody in the group
-			{ok, Tunnel} = iris:tunnel(Link, "multi", 500),
+			{ok, Tunnel} = iris:tunnel(Link, "multi", 1000),
 
 			% Serialize a load of messages
 			lists:foreach(fun(Seq) ->
-				ok = iris:send(Tunnel, <<Seq:32>>, 500)
+				ok = iris:send(Tunnel, <<Seq:32>>, 1000)
 			end, lists:seq(1, Messages)),
 
 			% Read back the echo and verify
 			lists:foreach(fun(Seq) ->
-				{ok, <<Seq:32>>} = iris:recv(Tunnel, 500)
+				{ok, <<Seq:32>>} = iris:recv(Tunnel, 1000)
 			end, lists:seq(1, Messages)),
 
 			% Close the tunnel
