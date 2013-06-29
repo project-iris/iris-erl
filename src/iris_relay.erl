@@ -307,8 +307,10 @@ handle_info({tunnel_data, TunId, Message}, State) ->
 
 % Delivers a data acknowledgement to a specific tunnel.
 handle_info({tunnel_ack, TunId}, State) ->
-	{TunId, Tunnel} = hd(ets:lookup(State#state.tunLive, TunId)),
-	Tunnel ! ack,
+	case ets:lookup(State#state.tunLive, TunId) of
+		[{TunId, Tunnel}] -> Tunnel ! ack;
+		[]                -> ok
+	end,
 	{noreply, State};
 
 %% Closes a tunnel connection, removing it from the local state.
