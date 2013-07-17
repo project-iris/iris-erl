@@ -37,7 +37,7 @@
 %% @end
 
 -module(iris).
--export([connect/2, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
+-export([connect/3, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, send/3, recv/2, close/1]).
 
 %% =============================================================================
@@ -64,19 +64,21 @@
 %% =============================================================================
 
 %% @doc Connects to the iris message relay running locally, registering with the
-%%      specified app name. The calling process will receive all inbound events.
+%%      specified app name, and registering the specified handler to receive all
+%%      iris events.
 %%
-%% @spec (Port, App) -> {ok, Connection} | {error, Reason}
+%% @spec (Port, App, Handler) -> {ok, Connection} | {error, Reason}
 %%      Port       = pos_integer()
 %%      App        = string()
+%%      Handler    = pid()
 %%      Connection = connection()
 %%      Reason     = atom()
 %% @end
--spec connect(Port :: pos_integer(), App :: string()) ->
+-spec connect(Port :: pos_integer(), App :: string(), Handler :: pid()) ->
 	{ok, Connection :: connection()} | {error, Reason :: atom()}.
 
-connect(Port, App) ->
-	case iris_relay:connect(Port, App) of
+connect(Port, App, Handler) ->
+	case iris_relay:connect(Port, App, Handler) of
 		{ok, Connection} -> {ok, {connection, Connection}};
 		Error            -> Error
 	end.

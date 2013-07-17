@@ -380,7 +380,7 @@ init({Port, App, Module, Args}) ->
 		{stop, _}   -> Result;
 		{ok, State} ->
 			% Initialize the Iris connection
-			case iris:connect(Port, App) of
+			case iris:connect(Port, App, self()) of
 				{ok, Link} ->
 					{ok, #state{
 						link       = Link,

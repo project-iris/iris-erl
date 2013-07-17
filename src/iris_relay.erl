@@ -10,7 +10,7 @@
 %% @private
 
 -module(iris_relay).
--export([connect/2, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
+-export([connect/3, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2, close/1]).
 
 -behaviour(gen_server).
@@ -23,11 +23,11 @@
 %% =============================================================================
 
 %% Starts the gen_server responsible for the relay connection.
--spec connect(Port :: pos_integer(), App :: string()) ->
+-spec connect(Port :: pos_integer(), App :: string(), Handler :: pid()) ->
 	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-connect(Port, App) ->
-	gen_server:start(?MODULE, {Port, lists:flatten(App), self()}, []).
+connect(Port, App, Handler) ->
+	gen_server:start(?MODULE, {Port, lists:flatten(App), Handler}, []).
 
 %% Forwards a broadcasted message for relaying.
 -spec broadcast(Connection :: pid(), App :: string(), Message :: binary()) ->
