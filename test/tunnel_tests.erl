@@ -49,8 +49,8 @@ single_test() ->
 
 % Starts a batch of servers, each sending and echoing a stream of messages.
 multi_test() ->
-	Servers = 100,
-	Messages = 100,
+	Servers = 75,
+	Messages = 50,
 
 	% Start up the concurrent tunnelers
 	lists:foreach(fun(_) ->
