@@ -48,7 +48,7 @@ single_test() ->
 		end, lists:seq(1, Events))
 	end, Names),
 
-	% Retrieve and verify all broadcasts
+	% Retrieve and verify all published events
 	lists:foreach(fun(_) ->
 		receive
 			{Topic, Event} ->
@@ -60,6 +60,7 @@ single_test() ->
 	% Close the Iris connection
 	ok = iris_server:stop(Server).
 
+% Multiple connections subscribe to the same batch of topics and publish to all.
 multi_test() ->
 	% Test parameters
 	Servers = 10,
@@ -119,7 +120,7 @@ multi_test() ->
 	% Sleep a bit to ensure subscriptions succeeded
 	timer:sleep(10),
 
-	% Permit all servers to begin broadcast
+	% Permit all servers to begin publishing
 	lists:foreach(fun(Pid) -> Pid ! cont end, Pids),
 
 	% Wait for all the terminations (big timeout)
