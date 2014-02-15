@@ -38,6 +38,9 @@ single_test() ->
 		ok = iris:subscribe(Link, Topic)
 	end, Names),
 
+  % Sleep a bit to ensure subscriptions succeeded
+  timer:sleep(10),
+
 	% Send some random events and check arrival
 	Messages = ets:new(events, [set, private]),
 	lists:foreach(fun(Topic) ->
