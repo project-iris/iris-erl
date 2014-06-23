@@ -136,10 +136,10 @@ init({Port, App, Handler}) ->
 	case gen_tcp:connect({127,0,0,1}, Port, [{active, false}, binary, {nodelay, true}]) of
 		{ok, Sock} ->
 			% Send the init packet
-			case iris_proto:sendInit(Sock, App) of
+			case iris_proto:send_init(Sock, App) of
 				ok ->
 					% Wait for init confirmation
-					case iris_proto:procInit(Sock) of
+					case iris_proto:proc_init(Sock) of
 						ok ->
 							% Spawn the receiver thread and return
 							process_flag(trap_exit, true),
@@ -164,7 +164,7 @@ init({Port, App, Handler}) ->
 
 %% Relays a message to the Iris node for broadcasting.
 handle_call({broadcast, App, Message}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:sendBroadcast(Sock, App, Message), State};
+	{reply, iris_proto:send_broadcast(Sock, App, Message), State};
 
 %% Relays a request to the Iris node, waiting async for the reply.
 handle_call({request, App, Request, Timeout}, From, State = #state{sock = Sock}) ->
@@ -174,7 +174,7 @@ handle_call({request, App, Request, Timeout}, From, State = #state{sock = Sock})
 	NewState = State#state{reqIdx = ReqId+1},
 
 	% Send the request to the relay and finish with a pending reply
-	case iris_proto:sendRequest(Sock, ReqId, App, Request, Timeout) of
+	case iris_proto:send_request(Sock, ReqId, App, Request, Timeout) of
 		ok    -> {noreply, NewState};
 		Error ->
 			ets:delete(State#state.reqPend, ReqId),
@@ -183,18 +183,18 @@ handle_call({request, App, Request, Timeout}, From, State = #state{sock = Sock})
 
 %% Relays a request reply to the Iris node.
 handle_call({reply, ReqId, Reply}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:sendReply(Sock, ReqId, Reply), State};
+	{reply, iris_proto:send_reply(Sock, ReqId, Reply), State};
 
 %% Relays a subscription request to the Iris node (taking care of dupliactes).
 handle_call({subscribe, Topic}, _From, State = #state{sock = Sock}) ->
 	case ets:insert_new(State#state.subLive, {Topic}) of
-		true  -> {reply, iris_proto:sendSubscribe(Sock, Topic), State};
+		true  -> {reply, iris_proto:send_subscribe(Sock, Topic), State};
 		false -> {reply, {error, duplicate}}
 	end;
 
 %% Relays an event to the Iris node for topic publishing.
 handle_call({publish, Topic, Event}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:sendPublish(Sock, Topic, Event), State};
+	{reply, iris_proto:send_publish(Sock, Topic, Event), State};
 
 %% Relays a subscription removal request to the Iris node (ensuring validity).
 handle_call({unsubscribe, Topic}, _From, State = #state{sock = Sock}) ->
@@ -203,12 +203,12 @@ handle_call({unsubscribe, Topic}, _From, State = #state{sock = Sock}) ->
 		false -> {reply, {error, non_existent}};
 		true ->
 			ets:delete(State#state.subLive, Topic),
-			{reply, iris_proto:sendUnsubscribe(Sock, Topic), State}
+			{reply, iris_proto:send_unsubscribe(Sock, Topic), State}
 	end;
 
 %% Sends a gracefull close request to the relay. The reply should arrive async.
 handle_call(close, From, State = #state{sock = Sock}) ->
-	case iris_proto:sendClose(Sock) of
+	case iris_proto:send_close(Sock) of
 		ok                      -> {noreply, State#state{closer = From}};
 		Error = {error, Reason} -> {stop, Reason, Error, State}
 	end;
@@ -221,7 +221,7 @@ handle_call({tunnel, App, Timeout}, From, State = #state{sock = Sock}) ->
 	NewState = State#state{tunIdx = TunId+1},
 
 	% Send the request to the relay and finish with a pending reply
-	case iris_proto:sendTunnelRequest(Sock, TunId, App, iris_tunnel:buffer(), Timeout) of
+	case iris_proto:send_tunnel_request(Sock, TunId, App, iris_tunnel:buffer(), Timeout) of
 		ok    -> {noreply, NewState};
 		Error ->
 			ets:delete(State#state.tunPend, TunId),
@@ -230,16 +230,16 @@ handle_call({tunnel, App, Timeout}, From, State = #state{sock = Sock}) ->
 
 %% Relays a tunnel data packet to the Iris node.
 handle_call({tunnel_send, TunId, Message}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:sendTunnelData(Sock, TunId, Message), State};
+	{reply, iris_proto:send_tunnel_data(Sock, TunId, Message), State};
 
 %% Relays a tunnel acknowledgement to the Iris node.
 handle_call({tunnel_ack, TunId}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:sendTunnelAck(Sock, TunId), State};
+	{reply, iris_proto:send_tunnel_ack(Sock, TunId), State};
 
 %% Forwards a tunnel closing request to the relay if not yet closed remotely and
 %% removes the tunnel from the local state.
 handle_call({tunnel_close, TunId}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:sendTunnelClose(Sock, TunId), State}.
+	{reply, iris_proto:send_tunnel_close(Sock, TunId), State}.
 
 %% Delivers a reply to a pending request.
 handle_info({reply, ReqId, Reply}, State) ->
@@ -270,7 +270,7 @@ handle_info({tunnel_request, TmpId, Buffer}, State = #state{sock = Sock}) ->
 	true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
 
 	% Acknowledge the tunnel creation to the relay
-	ok = iris_proto:sendTunnelReply(Sock, TmpId, TunId, iris_tunnel:buffer()),
+	ok = iris_proto:send_tunnel_reply(Sock, TmpId, TunId, iris_tunnel:buffer()),
 
 	% Notify the handler of the new tunnel
 	State#state.handler ! {tunnel, {tunnel, Tunnel}},
@@ -303,7 +303,7 @@ handle_info({tunnel_data, TunId, Message}, State) ->
 	Tunnel ! {data, Message},
 	{noreply, State};
 
-% Delivers a data acknowledgement to a specific tunnel.
+% Delivers a data acknowledgment to a specific tunnel.
 handle_info({tunnel_ack, TunId}, State) ->
 	case ets:lookup(State#state.tunLive, TunId) of
 		[{TunId, Tunnel}] -> Tunnel ! ack;

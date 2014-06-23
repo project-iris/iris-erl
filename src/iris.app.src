@@ -1,6 +1,6 @@
 {application, iris, [
-  {description, "Iris Erlang Binding"},
-  {vsn, "1.0"},
+  {description, "Iris Erlang binding"},
+  {vsn, "1.0.0"},
   {registered, []},
   {applications, [kernel, stdlib]},
   {env, []}
