@@ -9,32 +9,43 @@
 
 -module(iris_proto).
 
--export([version/0]).
 -export([send_init/2, send_broadcast/3, send_request/5, send_reply/3,
 	send_subscribe/2, send_publish/3, send_unsubscribe/2, send_close/1,
 	send_tunnel_request/5, send_tunnel_reply/4, send_tunnel_data/3, send_tunnel_ack/2,
 	send_tunnel_close/2, process/3, proc_init/1]).
 
--define(OP_INIT,      16#00). %% Connection initialization
--define(OP_BCAST,     16#01). %% Application broadcast
--define(OP_REQ,       16#02). %% Application request
--define(OP_REP,       16#03). %% Application reply
--define(OP_SUB,       16#04). %% Topic subscription
--define(OP_PUB,       16#05). %% Topic publish
--define(OP_UNSUB,     16#06). %% Topic subscription removal
--define(OP_CLOSE,     16#07). %% Connection closing
--define(OP_TUN_REQ,   16#08). %% Tunnel building request
--define(OP_TUN_REP,   16#09). %% Tunnel building reply
--define(OP_TUN_DATA,  16#0a). %% Tunnel data transfer
--define(OP_TUN_ACK,   16#0b). %% Tunnel data acknowledgement
--define(OP_TUN_CLOSE, 16#0c). %% Tunnel closing
+% Packet opcodes
+-define(OP_INIT,         16#00). % Out: connection initiation            | In: connection acceptance
+-define(OP_DENY,         16#01). % Out: <never sent>                     | In: connection refusal
+-define(OP_CLOSE,        16#02). % Out: connection tear-down initiation  | In: connection tear-down notification
 
-%% Implemented relay protocol version.
--spec version() -> [byte()].
+-define(OP_BROADCAST,    16#03). % Out: application broadcast initiation | In: application broadcast delivery
+-define(OP_REQUEST,      16#04). % Out: application request initiation   | In: application request delivery
+-define(OP_REPLY,        16#05). % Out: application reply initiation     | In: application reply delivery
 
-version() -> "v1.0".
+-define(OP_SUBSCRIBE,    16#06). % Out: topic subscription               | In: <never received>
+-define(OP_UNSUBSCRIBE,  16#07). % Out: topic subscription removal       | In: <never received>
+-define(OP_PUBLISH,      16#08). % Out: topic event publish              | In: topic event delivery
 
-%% Serializes a variable int into an iolist.
+-define(OP_TUN_INIT,     16#09). % Out: tunnel construction request      | In: tunnel initiation
+-define(OP_TUN_CONFIRM,  16#0a). % Out: tunnel confirmation              | In: tunnel construction result
+-define(OP_TUN_ALLOW,    16#0b). % Out: tunnel transfer allowance        | In: <same as out>
+-define(OP_TUN_TRANSFER, 16#0c). % Out: tunnel data exchange             | In: <same as out>
+-define(OP_TUN_CLOSE,    16#0d). % Out: tunnel termination request       | In: tunnel termination notification
+
+% Protocol constants
+-define(PROTO_VERSION, "v1.0-draft2").
+-define(CLIENT_MAGIC,  "iris-client-magic").
+-define(RELAY_MAGIC,   "iris-relay-magic").
+
+%% Serializes a boolean into an iolist.
+-spec pack_boolean(Flag :: boolean()) ->
+  Stream :: iolist().
+
+pack_boolean(false) -> [0];
+pack_boolean(true)  -> [1].
+
+%% Serializes a variable int using base 128 encoding into an iolist.
 -spec pack_varint(Num :: non_neg_integer()) ->
 	Stream :: iolist().
 
@@ -48,26 +59,26 @@ pack_varint(Num)                -> [128 + Num rem 128, pack_varint(Num div 128)]
 pack_binary(Binary) ->
 	[pack_varint(byte_size(Binary)), Binary].
 
-%% Serializes a length-tagged string into the relay.
+%% Serializes a length-tagged string into an iolist.
 -spec pack_string(String :: [byte()]) ->
 	Stream :: iolist().
 
 pack_string(String) ->
 	pack_binary(list_to_binary(String)).
 
-%% Assembles and serializes an init packet into the relay.
--spec send_init(Socket :: port(), App :: [byte()]) ->
+%% Sends a connection initiation.
+-spec send_init(Socket :: port(), Cluster :: [byte()]) ->
 	ok | {error, Reason :: atom()}.
 
-send_init(Socket, App) ->
-	gen_tcp:send(Socket, [?OP_INIT, pack_string(version()), pack_string(App)]).
+send_init(Socket, Cluster) ->
+	gen_tcp:send(Socket, [?OP_INIT, pack_string(?CLIENT_MAGIC), pack_string(?PROTO_VERSION), pack_string(Cluster)]).
 
 %% Assembles and serializes a broadcast packet into the relay.
 -spec send_broadcast(Socket :: port(), App :: [byte()], Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 send_broadcast(Socket, App, Message) ->
-	gen_tcp:send(Socket, [?OP_BCAST, pack_string(App), pack_binary(Message)]).
+	gen_tcp:send(Socket, [?OP_BROADCAST, pack_string(App), pack_binary(Message)]).
 
 %% Assembles and serializes a request packet into the relay.
 -spec send_request(Socket :: port(), ReqId :: non_neg_integer(), App :: [byte()],
@@ -75,35 +86,35 @@ send_broadcast(Socket, App, Message) ->
 	ok | {error, Reason :: atom()}.
 
 send_request(Socket, ReqId, App, Req, Timeout) ->
-	gen_tcp:send(Socket, [?OP_REQ, pack_varint(ReqId), pack_string(App), pack_binary(Req), pack_varint(Timeout)]).
+	gen_tcp:send(Socket, [?OP_REQUEST, pack_varint(ReqId), pack_string(App), pack_binary(Req), pack_varint(Timeout)]).
 
 %% Assembles and serializes a reply packet into the relay.
 -spec send_reply(Socket :: port(), ReqId :: non_neg_integer(), Reply :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 send_reply(Socket, ReqId, Reply) ->
-	gen_tcp:send(Socket, [?OP_REP, pack_varint(ReqId),	pack_binary(Reply)]).
+	gen_tcp:send(Socket, [?OP_REPLY, pack_varint(ReqId),	pack_binary(Reply)]).
 
 %% Assembles and serializes a subscription packet into the relay.
 -spec send_subscribe(Socket :: port(), Topic :: [byte()]) ->
 	ok | {error, Reason :: atom()}.
 
 send_subscribe(Socket, Topic) ->
-	gen_tcp:send(Socket, [?OP_SUB, pack_string(Topic)]).
+	gen_tcp:send(Socket, [?OP_SUBSCRIBE, pack_string(Topic)]).
 
 %% Assembles and serializes a message to be published in a topic.
 -spec send_publish(Socket :: port(), Topic :: [byte()], Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 send_publish(Socket, Topic, Message) ->
-	gen_tcp:send(Socket, [?OP_PUB, pack_string(Topic), pack_binary(Message)]).
+	gen_tcp:send(Socket, [?OP_PUBLISH, pack_string(Topic), pack_binary(Message)]).
 
 %% Assembles and serializes a subscription removal packet into the relay.
 -spec send_unsubscribe(Socket :: port(), Topic :: [byte()]) ->
 	ok | {error, Reason :: atom()}.
 
 send_unsubscribe(Socket, Topic) ->
-	gen_tcp:send(Socket, [?OP_UNSUB, pack_string(Topic)]).
+	gen_tcp:send(Socket, [?OP_UNSUBSCRIBE, pack_string(Topic)]).
 
 %% Assembles and serializes a close packet into the relay.
 -spec send_close(Socket :: port()) ->
@@ -118,7 +129,7 @@ send_close(Socket) ->
 	ok | {error, Reason :: atom()}.
 
 send_tunnel_request(Socket, TunId, App, Buffer, Timeout) ->
-	gen_tcp:send(Socket, [?OP_TUN_REQ, pack_varint(TunId), pack_string(App), pack_varint(Buffer), pack_varint(Timeout)]).
+	gen_tcp:send(Socket, [?OP_TUN_INIT, pack_varint(TunId), pack_string(App), pack_varint(Buffer), pack_varint(Timeout)]).
 
 %% Assembles and serializes a tunneling confirmation packet into the relay.
 -spec send_tunnel_reply(Socket :: port(), TmpId :: non_neg_integer(),
@@ -126,21 +137,21 @@ send_tunnel_request(Socket, TunId, App, Buffer, Timeout) ->
 	ok | {error, Reason :: atom()}.
 
 send_tunnel_reply(Socket, TmpId, TunId, Buffer) ->
-	gen_tcp:send(Socket, [?OP_TUN_REP, pack_varint(TmpId), pack_varint(TunId), pack_varint(Buffer)]).
+	gen_tcp:send(Socket, [?OP_TUN_CONFIRM, pack_varint(TmpId), pack_varint(TunId), pack_varint(Buffer)]).
 
 %% Assembles and serializes a tunnel data packet into the relay.
 -spec send_tunnel_data(Socket :: port(), TunId :: non_neg_integer(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 send_tunnel_data(Socket, TunId, Message) ->
-	gen_tcp:send(Socket, [?OP_TUN_DATA, pack_varint(TunId), pack_binary(Message)]).
+	gen_tcp:send(Socket, [?OP_TUN_TRANSFER, pack_varint(TunId), pack_binary(Message)]).
 
 %% Assembles and serializes a tunnel data acknowledgement into the relay.
 -spec send_tunnel_ack(Socket :: port(), TunId :: non_neg_integer()) ->
 	ok | {error, Reason :: atom()}.
 
 send_tunnel_ack(Socket, TunId) ->
-	gen_tcp:send(Socket, [?OP_TUN_ACK, pack_varint(TunId)]).
+	gen_tcp:send(Socket, [?OP_TUN_ALLOW, pack_varint(TunId)]).
 
 %% Assembles and serializes a tunnel atomination message into the relay.
 -spec send_tunnel_close(Socket :: port(), TunId :: non_neg_integer()) ->
@@ -149,7 +160,7 @@ send_tunnel_ack(Socket, TunId) ->
 send_tunnel_close(Socket, TunId) ->
 	gen_tcp:send(Socket, [?OP_TUN_CLOSE, pack_varint(TunId)]).
 
-%% Retrieves a single byte from the relay.
+%% Retrieves a single byte from the relay connection.
 -spec recv_byte(Socket :: port()) ->
 	Input :: byte() | {error, Reason :: atom()}.
 
@@ -159,39 +170,39 @@ recv_byte(Socket) ->
 		Error            -> Error
 	end.
 
-%% Retrieves a boolean from the relay.
+%% Retrieves a boolean from the relay connection.
 -spec recv_bool(Socket :: port()) ->
 	Input :: boolean() | {error, Reason :: atom()}.
 
 recv_bool(Socket) ->
 	case recv_byte(Socket) of
-		Error = {error, _Reason} -> Error;
+    Error = {error, _Reason} -> Error;
 		0 -> false;
 		1 -> true;
-		_InvalidBool -> {error, violation}
+		InvalidBool -> {error, io_lib:format("protocol violation: invalid boolean value: ~p", [InvalidBool])}
 	end.
 
-%% Retrieves a variable int from the relay.
--spec recvVarint(Socket :: port()) ->
+%% Retrieves a variable int in base 128 encoding from the relay connection.
+-spec recv_varint(Socket :: port()) ->
 	Input :: non_neg_integer() | {error, Reason :: atom()}.
 
-recvVarint(Socket) ->
+recv_varint(Socket) ->
 	case recv_byte(Socket) of
 		Error = {error, _Reason} -> Error;
 		Byte when Byte < 128     -> Byte;
 		Byte ->
-			case recvVarint(Socket) of
+			case recv_varint(Socket) of
 				Error = {error, _Reason} -> Error;
 				Num                      -> Byte - 128 + 128 * Num
 			end
 	end.
 
-%% Retrieves a length-tagged binary array from the relay.
+%% Retrieves a length-tagged binary array from the relay connection.
 -spec recv_binary(Socket :: port()) ->
 	Input :: binary() | {error, Reason :: atom()}.
 
 recv_binary(Socket) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		Size ->
 			case gen_tcp:recv(Socket, Size) of
@@ -200,12 +211,12 @@ recv_binary(Socket) ->
 			end
 	end.
 
-%% Retrieves a length-tagged binary array from the relay.
+%% Retrieves a length-tagged string from the relay connection.
 -spec recv_string(Socket :: port()) ->
 	Input :: [byte()] | {error, Reason :: atom()}.
 
 recv_string(Socket) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		Size ->
 			case gen_tcp:recv(Socket, Size) of
@@ -214,15 +225,32 @@ recv_string(Socket) ->
 			end
 	end.
 
-%% Retrieves a connection initialization response and returns whether ok.
+%% Retrieves a connection initiation response (either accept or deny).
 -spec proc_init(Socket :: port()) ->
-	ok | {error, Reason :: atom()}.
+	{ok, Version :: string()} | {error, Reason :: atom()}.
 
 proc_init(Socket) ->
+  % Retrieve the response opcode
 	case recv_byte(Socket) of
-		?OP_INIT                 -> ok;
 		Error = {error, _Reason} -> Error;
-		_InvalidOpcode           -> {error, violation}
+    OpCode when OpCode =:= ?OP_INIT; OpCode =:= ?OP_DENY ->
+      % Verify the opcode validity and relay magic string
+      case recv_string(Socket) of
+        Error = {error, _Reason} -> Error;
+        ?RELAY_MAGIC ->
+          % Depending on success or failure, proceed and return
+          case OpCode of
+            ?OP_INIT -> recv_string(Socket);
+            ?OP_DENY ->
+              % Read the reason for connection denial
+              case recv_string(Socket) of
+                Error = {error, _Reason} -> Error;
+                Reason -> {error, io_lib:format("connection denied: ~s", [Reason])}
+              end
+          end;
+        InvalidMagic -> {error, io_lib:format("protocol violation: invalid relay magic: ~s", [InvalidMagic])}
+      end;
+		InvalidOpCode -> {error, io_lib:format("protocol violation: invalid init response opcode: ~p", [InvalidOpCode])}
 	end.
 
 %% Retrieves a remote broadcast message from the relay and notifies the handler.
@@ -242,7 +270,7 @@ proc_broadcast(Socket, Handler) ->
 	ok | {error, Reason :: atom()}.
 
 proc_request(Socket, Owner, Handler) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		ReqId ->
 			case recv_binary(Socket) of
@@ -258,7 +286,7 @@ proc_request(Socket, Owner, Handler) ->
 	ok | {error, Reason :: atom()}.
 
 proc_reply(Socket, Owner) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		ReqId ->
 			case recv_bool(Socket) of
@@ -297,10 +325,10 @@ proc_publish(Socket, Owner) ->
 	ok | {error, Reason :: atom()}.
 
 proc_tunnel_request(Socket, Owner) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		TmpId ->
-			case recvVarint(Socket) of
+			case recv_varint(Socket) of
 				Error = {error, _Reason} -> Error;
 				Buffer ->
 					Owner ! {tunnel_request, TmpId, Buffer},
@@ -313,7 +341,7 @@ proc_tunnel_request(Socket, Owner) ->
 	ok | {error, Reason :: atom()}.
 
 proc_tunnel_reply(Socket, Owner) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		TunId ->
 			case recv_bool(Socket) of
@@ -322,7 +350,7 @@ proc_tunnel_reply(Socket, Owner) ->
 					Owner ! {tunnel_reply, TunId, {error, timeout}},
 					ok;
 				false ->
-					case recvVarint(Socket) of
+					case recv_varint(Socket) of
 						Error = {error, _Reason} -> Error;
 						Buffer ->
 							Owner ! {tunnel_reply, TunId, {ok, Buffer}},
@@ -336,7 +364,7 @@ proc_tunnel_reply(Socket, Owner) ->
 	ok | {error, Reason :: atom()}.
 
 proc_tunnel_data(Socket, Owner) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		TunId ->
 			case recv_binary(Socket) of
@@ -352,7 +380,7 @@ proc_tunnel_data(Socket, Owner) ->
 	ok | {error, Reason :: atom()}.
 
 proc_tunnel_ack(Socket, Owner) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		TunId ->
 			Owner ! {tunnel_ack, TunId},
@@ -364,7 +392,7 @@ proc_tunnel_ack(Socket, Owner) ->
 	ok | {error, Reason :: atom()}.
 
 proc_tunnel_close(Socket, Owner) ->
-	case recvVarint(Socket) of
+	case recv_varint(Socket) of
 		Error = {error, _Reason} -> Error;
 		TunId ->
 			Owner ! {tunnel_close, TunId},
@@ -379,14 +407,14 @@ proc_tunnel_close(Socket, Owner) ->
 process(Socket, Owner, Handler) ->
 	Res = case recv_byte(Socket) of
 		Error = {error, _} -> Error;
-		?OP_BCAST          -> proc_broadcast(Socket, Handler);
-		?OP_REQ            -> proc_request(Socket, Owner, Handler);
-		?OP_REP            -> proc_reply(Socket, Owner);
-		?OP_PUB            -> proc_publish(Socket, Owner);
-		?OP_TUN_REQ        -> proc_tunnel_request(Socket, Owner);
-		?OP_TUN_REP        -> proc_tunnel_reply(Socket, Owner);
-		?OP_TUN_DATA       -> proc_tunnel_data(Socket, Owner);
-		?OP_TUN_ACK        -> proc_tunnel_ack(Socket, Owner);
+		?OP_BROADCAST      -> proc_broadcast(Socket, Handler);
+		?OP_REQUEST        -> proc_request(Socket, Owner, Handler);
+		?OP_REPLY          -> proc_reply(Socket, Owner);
+		?OP_PUBLISH        -> proc_publish(Socket, Owner);
+		?OP_TUN_INIT       -> proc_tunnel_request(Socket, Owner);
+		?OP_TUN_CONFIRM    -> proc_tunnel_reply(Socket, Owner);
+    ?OP_TUN_ALLOW      -> proc_tunnel_ack(Socket, Owner);
+		?OP_TUN_TRANSFER   -> proc_tunnel_data(Socket, Owner);
 		?OP_TUN_CLOSE      -> proc_tunnel_close(Socket, Owner);
 		?OP_CLOSE          -> exit(ok);
 		_InvalidOpcode     -> {error, violation}

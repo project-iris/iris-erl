@@ -140,7 +140,8 @@ init({Port, App, Handler}) ->
 				ok ->
 					% Wait for init confirmation
 					case iris_proto:proc_init(Sock) of
-						ok ->
+            {error, Reason} -> {stop, Reason};
+						Version ->
 							% Spawn the receiver thread and return
 							process_flag(trap_exit, true),
 							spawn_link(iris_proto, process, [Sock, self(), Handler]),
@@ -154,8 +155,7 @@ init({Port, App, Handler}) ->
 								tunPend = ets:new(tunnels_pending, [set, private]),
 								tunLive = ets:new(tunnels, [set, private]),
 								closer  = nil
-							}};
-						{error, Reason} -> {stop, Reason}
+							}}
 					end;
 				{error, Reason} -> {stop, Reason}
 			end;
