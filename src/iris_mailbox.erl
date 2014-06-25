@@ -9,12 +9,35 @@
 %% it is a fast message forwarder that schedules inbound messages into the
 %% owner's mailbox if there is capacity available, or discards them otherwise.
 
+%% @private
+
 -module(iris_mailbox).
--export([limit/4]).
+-export([start_link/3, schedule/3, grant/2, limit/4]).
+
+%% Spawns a bounded mailbox forwarder and links it to the current process.
+-spec start_link(Owner :: pid(), Type :: atom(), Limit :: pos_integer()) -> pid().
+
+start_link(Owner, Type, Limit) ->
+  spawn_link(?MODULE, limit, [Owner, Type, Limit, 0]).
+
+%% Schedules a message into the remote mailbox if and only if the associated
+%% space requirements can be satisfied.
+-spec schedule(Limiter :: pid(), Size :: non_neg_integer(), Message :: term()) -> ok.
+
+schedule(Limiter, Size, Message) ->
+  Limiter ! {schedule, Size, Message},
+  ok.
+
+%% Grants additional space allowance to a bounded mailbox.
+-spec grant(Limiter :: pid(), Space :: non_neg_integer()) -> ok.
+
+grant(Limiter, Space) ->
+  Limiter ! {grant, Space},
+  ok.
 
 %% Forwards inbound messages to the owner's message queue, given that the total
 %% memory consumption is below a threshold. Discards otherwise.
--spec limit(Owner :: pid(), Type :: [byte()], Limit :: pos_integer(),
+-spec limit(Owner :: pid(), Type :: atom(), Limit :: pos_integer(),
   Used :: non_neg_integer()) -> no_return().
 
 limit(Owner, Type, Limit, Used) ->
@@ -23,7 +46,7 @@ limit(Owner, Type, Limit, Used) ->
       Owner ! Message,
       limit(Owner, Type, Limit, Used + Size);
     {schedule, Size, _Message} ->
-      io:format("~s exceeded memory allowance: limit=~p used=~p size=~p", [Type, Limit, Used, Size]),
+      io:format("~p exceeded memory allowance: limit=~p used=~p size=~p~n", [Type, Limit, Used, Size]),
       limit(Owner, Type, Limit, Used);
     {grant, Space} ->
       limit(Owner, Type, Limit, Used - Space)

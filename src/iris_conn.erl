@@ -11,6 +11,8 @@
 -export([connect/1, register/3, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2, close/1]).
 
+-export([handle_broadcast/2, handle_request/5]).
+
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
 	code_change/3]).
@@ -25,7 +27,8 @@
 	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
 connect(Port) ->
-	gen_server:start(?MODULE, {Port}, []).
+	gen_server:start(?MODULE, {Port, "", nil}, []).
+
 
 %% Starts the gen_server responsible for a service connection.
 -spec register(Port :: pos_integer(), Cluster :: string(), Handler :: pid()) ->
@@ -34,12 +37,21 @@ connect(Port) ->
 register(Port, Cluster, Handler) ->
   gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler}, []).
 
+
+%% Notifies the relay server of a graceful close request.
+-spec close(Connection :: pid()) -> ok | {error, Reason :: term()}.
+
+close(Connection) ->
+  gen_server:call(Connection, close, infinity).
+
+
 %% Forwards a broadcast message for relaying.
 -spec broadcast(Connection :: pid(), Cluster :: string(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 broadcast(Connection, Cluster, Message) ->
 	gen_server:call(Connection, {broadcast, lists:flatten(Cluster), Message}, infinity).
+
 
 %% Forwards the request to the relay. Timeouts are handled relay side.
 -spec request(Connection :: pid(), Cluster :: string(), Request :: binary(), Timeout :: pos_integer()) ->
@@ -48,12 +60,6 @@ broadcast(Connection, Cluster, Message) ->
 request(Connection, Cluster, Request, Timeout) ->
 	gen_server:call(Connection, {request, lists:flatten(Cluster), Request, Timeout}, infinity).
 
-%% Schedules an application request for the service handler to process.
--spec handle_request(Connection :: pid(), Cluster :: string(), Request :: binary(), Timeout :: pos_integer()) ->
-  {ok, Reply :: binary()} | {error, Reason :: atom()}.
-
-handle_request(Connection, Cluster, Request, Timeout) ->
-  gen_server:call(Connection, {handle_request, lists:flatten(Cluster), Request, Timeout}, infinity).
 
 %% Forwards an async reply to the relay to be sent back to the caller.
 -spec reply(Sender :: iris:sender(), Reply :: binary()) ->
@@ -62,12 +68,14 @@ handle_request(Connection, Cluster, Request, Timeout) ->
 reply({Connection, RequestId}, Reply) ->
 	gen_server:call(Connection, {reply, RequestId, Reply}, infinity).
 
+
 %% Forwards the subscription request to the relay.
 -spec subscribe(Connection :: pid(), Topic :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 subscribe(Connection, Topic) ->
 	gen_server:call(Connection, {subscribe, lists:flatten(Topic)}, infinity).
+
 
 %% Publishes a message to the topic.
 -spec publish(Connection :: pid(), Topic :: string(), Event :: binary()) ->
@@ -76,12 +84,14 @@ subscribe(Connection, Topic) ->
 publish(Connection, Topic, Event) ->
 	gen_server:call(Connection, {publish, lists:flatten(Topic), Event}, infinity).
 
+
 %% Forwards the subscription removal request to the relay.
 -spec unsubscribe(Connection :: pid(), Topic :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 unsubscribe(Connection, Topic) ->
 	gen_server:call(Connection, {unsubscribe, lists:flatten(Topic)}, infinity).
+
 
 %% Forwards a tunneling request to the relay.
 -spec tunnel(Connection :: pid(), Cluster :: string(), Timeout :: pos_integer()) ->
@@ -90,12 +100,14 @@ unsubscribe(Connection, Topic) ->
 tunnel(Connection, Cluster, Timeout) ->
 	gen_server:call(Connection, {tunnel, lists:flatten(Cluster), Timeout}, infinity).
 
+
 %% Forwards a tunnel data packet to the relay. Flow control should be already handled!
 -spec tunnel_send(Connection :: pid(), TunId :: non_neg_integer(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 tunnel_send(Connection, TunId, Message) ->
 	gen_server:call(Connection, {tunnel_send, TunId, Message}, infinity).
+
 
 %% Forwards a tunnel data acknowledgement to the relay.
 -spec tunnel_ack(Connection :: pid(), TunId :: non_neg_integer()) ->
@@ -104,6 +116,7 @@ tunnel_send(Connection, TunId, Message) ->
 tunnel_ack(Connection, TunId) ->
 	gen_server:call(Connection, {tunnel_ack, TunId}, infinity).
 
+
 %% Forwards a tunnel close request to the relay.
 -spec tunnel_close(Connection :: pid(), TunId :: non_neg_integer()) ->
 	ok | {error, Reason :: atom()}.
@@ -111,12 +124,24 @@ tunnel_ack(Connection, TunId) ->
 tunnel_close(Connection, TunId) ->
 	gen_server:call(Connection, {tunnel_close, TunId}, infinity).
 
-%% Notifies the relay server of a gracefull close request.
--spec close(Connection :: pid()) ->
-	ok | {error, Reason :: atom()}.
 
-close(Connection) ->
-	gen_server:call(Connection, close, infinity).
+%% =============================================================================
+%% Internal API callback functions
+%% =============================================================================
+
+%% Schedules an application broadcast for the service handler to process.
+-spec handle_broadcast(Limiter :: pid(), Message :: binary()) -> ok.
+
+handle_broadcast(Limiter, Message) ->
+  ok = iris_mailbox:schedule(Limiter, byte_size(Message), {handle_broadcast, Message}).
+
+
+%% Schedules an application request for the service handler to process.
+-spec handle_request(Limiter :: pid(), Owner :: pid(), Id :: non_neg_integer(),
+  Request :: binary(), Timeout :: pos_integer()) -> ok.
+
+handle_request(Limiter, Owner, Id, Request, Timeout) ->
+  ok = iris_mailbox:schedule(Limiter, byte_size(Request), {handle_request, {Owner, Id}, Request, Timeout}).
 
 
 %% =============================================================================
@@ -154,10 +179,14 @@ init({Port, Cluster, Handler}) ->
 				ok ->
 					% Wait for init confirmation
 					case iris_proto:proc_init(Sock) of
-						{ok, Version} ->
-							% Spawn the receiver thread and return
+						{ok, _Version} ->
+							% Spawn the mailbox limiter threads and message receiver
 							process_flag(trap_exit, true),
-							spawn_link(iris_proto, process, [Sock, self(), Handler]),
+              Broadcaster = iris_mailbox:start_link(Handler, broadcast, 64 * 1024),
+              Requester   = iris_mailbox:start_link(Handler, request, 64 * 1024),
+              _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester),
+
+              % Assemble the internal state and return
 							{ok, #state{
 								sock    = Sock,
 								handler = Handler,
@@ -175,6 +204,11 @@ init({Port, Cluster, Handler}) ->
 			end;
 		{error, Reason} -> {stop, Reason}
 	end.
+
+%% Sends a graceful close request to the relay. The reply will arrive async.
+handle_call(close, From, State = #state{sock = Sock}) ->
+  ok = iris_proto:send_close(Sock),
+  {noreply, State#state{closer = From}};
 
 %% Relays a message to the Iris node for broadcasting.
 handle_call({broadcast, Cluster, Message}, _From, State = #state{sock = Sock}) ->
@@ -218,13 +252,6 @@ handle_call({unsubscribe, Topic}, _From, State = #state{sock = Sock}) ->
 		true ->
 			ets:delete(State#state.subLive, Topic),
 			{reply, iris_proto:send_unsubscribe(Sock, Topic), State}
-	end;
-
-%% Sends a gracefull close request to the relay. The reply should arrive async.
-handle_call(close, From, State = #state{sock = Sock}) ->
-	case iris_proto:send_close(Sock) of
-		ok                      -> {noreply, State#state{closer = From}};
-		Error = {error, Reason} -> {stop, Reason, Error, State}
 	end;
 
 %% Relays a tunneling request to the Iris node, waiting async with for the reply.

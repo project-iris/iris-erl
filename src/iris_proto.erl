@@ -17,7 +17,8 @@
 -export([send_init/2, send_broadcast/3, send_request/5, send_reply/4,
 	send_subscribe/2, send_publish/3, send_unsubscribe/2, send_close/1,
 	send_tunnel_init/4, send_tunnel_confirm/3, send_tunnel_allowance/3,
-	send_tunnel_transfer/4, send_tunnel_close/2, process/3, proc_init/1]).
+	send_tunnel_transfer/4, send_tunnel_close/2, proc_init/1]).
+-export([start_link/3, process/4]).
 
 % Packet opcodes
 -define(OP_INIT,         16#00). % Out: connection initiation            | In: connection acceptance
@@ -252,8 +253,7 @@ proc_close(Socket) ->
 
 proc_broadcast(Socket, Handler) ->
 	{ok, Message} = recv_binary(Socket),
-	Handler ! {broadcast, Message},
-	ok.
+  ok = iris_conn:handle_broadcast(Handler, Message).
 
 %% Retrieves an application request delivery.
 -spec proc_request(Socket :: port(), Owner :: pid(), Handler :: pid()) -> ok.
@@ -262,8 +262,7 @@ proc_request(Socket, Owner, Handler) ->
 	{ok, Id}      = recv_varint(Socket),
 	{ok, Request} = recv_binary(Socket),
 	{ok, Timeout} = recv_varint(Socket),
-	Handler ! {request, {Owner, Id}, Request, Timeout},
-	ok.
+  ok = iris_conn:handle_request(Handler, Owner, Id, Request, Timeout).
 
 %% Retrieves an application reply delivery.
 -spec proc_reply(Socket :: port(), Owner :: pid()) -> ok.
@@ -346,14 +345,23 @@ proc_tunnel_close(Socket, Owner) ->
 	Owner ! {tunnel_close, Id, Reason},
 	ok.
 
+%% Starts a new packet processor, reading from the given socket and dispatching
+%% mostly to self(), with the exception of broadcasts and requests which have
+%% bounded mailboxes in front of the handler.
+-spec start_link(Socket :: port(), Broadcaster :: pid(), Requester :: pid()) -> pid().
+
+start_link(Socket, Broadcaster, Requester) ->
+  spawn_link(?MODULE, process, [Socket, self(), Broadcaster, Requester]).
+
 %% Retrieves messages from the client connection and keeps processing them until
 %% either the relay closes (graceful close) or the connection drops.
--spec process(Socket :: port(), Owner :: pid(), Handler :: pid()) -> no_return().
+-spec process(Socket :: port(), Owner :: pid(),
+  Broadcaster :: pid(), Requester :: pid()) -> no_return().
 
-process(Socket, Owner, Handler) ->
+process(Socket, Owner, Broadcaster, Requester) ->
 	ok = case recv_byte(Socket) of
-		{ok, ?OP_BROADCAST}    -> proc_broadcast(Socket, Handler);
-		{ok, ?OP_REQUEST}      -> proc_request(Socket, Owner, Handler);
+		{ok, ?OP_BROADCAST}    -> proc_broadcast(Socket, Broadcaster);
+		{ok, ?OP_REQUEST}      -> proc_request(Socket, Owner, Requester);
 		{ok, ?OP_REPLY}        -> proc_reply(Socket, Owner);
 		{ok, ?OP_PUBLISH}      -> proc_publish(Socket, Owner);
 		{ok, ?OP_TUN_INIT}     -> proc_tunnel_init(Socket, Owner);
@@ -365,4 +373,4 @@ process(Socket, Owner, Handler) ->
 			{ok, ""} = proc_close(Socket),
 			exit(ok)
 	end,
-	process(Socket, Owner, Handler).
+	process(Socket, Owner, Broadcaster, Requester).
