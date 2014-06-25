@@ -8,7 +8,7 @@
 %% @private
 
 -module(iris_conn).
--export([connect/3, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
+-export([connect/1, register/3, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2, close/1]).
 
 -behaviour(gen_server).
@@ -24,17 +24,17 @@
 -spec connect(Port :: pos_integer()) ->
 	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-connect(Port, Cluster, Handler) ->
+connect(Port) ->
 	gen_server:start(?MODULE, {Port}, []).
 
 %% Starts the gen_server responsible for a service connection.
 -spec register(Port :: pos_integer(), Cluster :: string(), Handler :: pid()) ->
   {ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-connect(Port, Cluster, Handler) ->
+register(Port, Cluster, Handler) ->
   gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler}, []).
 
-%% Forwards a broadcasted message for relaying.
+%% Forwards a broadcast message for relaying.
 -spec broadcast(Connection :: pid(), Cluster :: string(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
@@ -47,6 +47,13 @@ broadcast(Connection, Cluster, Message) ->
 
 request(Connection, Cluster, Request, Timeout) ->
 	gen_server:call(Connection, {request, lists:flatten(Cluster), Request, Timeout}, infinity).
+
+%% Schedules an application request for the service handler to process.
+-spec handle_request(Connection :: pid(), Cluster :: string(), Request :: binary(), Timeout :: pos_integer()) ->
+  {ok, Reply :: binary()} | {error, Reason :: atom()}.
+
+handle_request(Connection, Cluster, Request, Timeout) ->
+  gen_server:call(Connection, {handle_request, lists:flatten(Cluster), Request, Timeout}, infinity).
 
 %% Forwards an async reply to the relay to be sent back to the caller.
 -spec reply(Sender :: iris:sender(), Reply :: binary()) ->
@@ -147,8 +154,7 @@ init({Port, Cluster, Handler}) ->
 				ok ->
 					% Wait for init confirmation
 					case iris_proto:proc_init(Sock) of
-            {error, Reason} -> {stop, Reason};
-						Version ->
+						{ok, Version} ->
 							% Spawn the receiver thread and return
 							process_flag(trap_exit, true),
 							spawn_link(iris_proto, process, [Sock, self(), Handler]),
@@ -162,7 +168,8 @@ init({Port, Cluster, Handler}) ->
 								tunPend = ets:new(tunnels_pending, [set, private]),
 								tunLive = ets:new(tunnels, [set, private]),
 								closer  = nil
-							}}
+							}};
+            {error, Reason} -> {stop, Reason}
 					end;
 				{error, Reason} -> {stop, Reason}
 			end;

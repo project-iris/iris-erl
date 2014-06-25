@@ -251,8 +251,8 @@ proc_close(Socket) ->
 -spec proc_broadcast(Socket :: port(), Handler :: pid()) -> ok.
 
 proc_broadcast(Socket, Handler) ->
-	{ok, Msg} = recv_binary(Socket),
-	Handler ! {broadcast, Msg},
+	{ok, Message} = recv_binary(Socket),
+	Handler ! {broadcast, Message},
 	ok.
 
 %% Retrieves an application request delivery.
