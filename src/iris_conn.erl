@@ -7,7 +7,7 @@
 
 %% @private
 
--module(iris_relay).
+-module(iris_conn).
 -export([connect/3, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2, close/1]).
 
@@ -20,26 +20,33 @@
 %% External API functions
 %% =============================================================================
 
-%% Starts the gen_server responsible for the relay connection.
--spec connect(Port :: pos_integer(), App :: string(), Handler :: pid()) ->
+%% Starts the gen_server responsible for a client connection.
+-spec connect(Port :: pos_integer()) ->
 	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-connect(Port, App, Handler) ->
-	gen_server:start(?MODULE, {Port, lists:flatten(App), Handler}, []).
+connect(Port, Cluster, Handler) ->
+	gen_server:start(?MODULE, {Port}, []).
+
+%% Starts the gen_server responsible for a service connection.
+-spec register(Port :: pos_integer(), Cluster :: string(), Handler :: pid()) ->
+  {ok, Connection :: pid()} | {error, Reason :: atom()}.
+
+connect(Port, Cluster, Handler) ->
+  gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler}, []).
 
 %% Forwards a broadcasted message for relaying.
--spec broadcast(Connection :: pid(), App :: string(), Message :: binary()) ->
+-spec broadcast(Connection :: pid(), Cluster :: string(), Message :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
-broadcast(Connection, App, Message) ->
-	gen_server:call(Connection, {broadcast, lists:flatten(App), Message}, infinity).
+broadcast(Connection, Cluster, Message) ->
+	gen_server:call(Connection, {broadcast, lists:flatten(Cluster), Message}, infinity).
 
 %% Forwards the request to the relay. Timeouts are handled relay side.
--spec request(Connection :: pid(), App :: string(), Request :: binary(), Timeout :: pos_integer()) ->
+-spec request(Connection :: pid(), Cluster :: string(), Request :: binary(), Timeout :: pos_integer()) ->
 	{ok, Reply :: binary()} | {error, Reason :: atom()}.
 
-request(Connection, App, Request, Timeout) ->
-	gen_server:call(Connection, {request, lists:flatten(App), Request, Timeout}, infinity).
+request(Connection, Cluster, Request, Timeout) ->
+	gen_server:call(Connection, {request, lists:flatten(Cluster), Request, Timeout}, infinity).
 
 %% Forwards an async reply to the relay to be sent back to the caller.
 -spec reply(Sender :: iris:sender(), Reply :: binary()) ->
@@ -70,11 +77,11 @@ unsubscribe(Connection, Topic) ->
 	gen_server:call(Connection, {unsubscribe, lists:flatten(Topic)}, infinity).
 
 %% Forwards a tunneling request to the relay.
--spec tunnel(Connection :: pid(), App :: string(), Timeout :: pos_integer()) ->
+-spec tunnel(Connection :: pid(), Cluster :: string(), Timeout :: pos_integer()) ->
 	{ok, Tunnel :: iris:tunnel()} | {error, Reason :: atom()}.
 
-tunnel(Connection, App, Timeout) ->
-	gen_server:call(Connection, {tunnel, lists:flatten(App), Timeout}, infinity).
+tunnel(Connection, Cluster, Timeout) ->
+	gen_server:call(Connection, {tunnel, lists:flatten(Cluster), Timeout}, infinity).
 
 %% Forwards a tunnel data packet to the relay. Flow control should be already handled!
 -spec tunnel_send(Connection :: pid(), TunId :: non_neg_integer(), Message :: binary()) ->
@@ -131,12 +138,12 @@ close(Connection) ->
 %% =============================================================================
 
 %% Connects to the locally running iris node and initiates the connection.
-init({Port, App, Handler}) ->
+init({Port, Cluster, Handler}) ->
 	% Open the TCP connection
 	case gen_tcp:connect({127,0,0,1}, Port, [{active, false}, binary, {nodelay, true}]) of
 		{ok, Sock} ->
 			% Send the init packet
-			case iris_proto:send_init(Sock, App) of
+			case iris_proto:send_init(Sock, Cluster) of
 				ok ->
 					% Wait for init confirmation
 					case iris_proto:proc_init(Sock) of
@@ -163,18 +170,18 @@ init({Port, App, Handler}) ->
 	end.
 
 %% Relays a message to the Iris node for broadcasting.
-handle_call({broadcast, App, Message}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:send_broadcast(Sock, App, Message), State};
+handle_call({broadcast, Cluster, Message}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:send_broadcast(Sock, Cluster, Message), State};
 
 %% Relays a request to the Iris node, waiting async for the reply.
-handle_call({request, App, Request, Timeout}, From, State = #state{sock = Sock}) ->
+handle_call({request, Cluster, Request, Timeout}, From, State = #state{sock = Sock}) ->
 	% Create a reply channel for the results
 	ReqId = State#state.reqIdx,
 	true = ets:insert_new(State#state.reqPend, {ReqId, From}),
 	NewState = State#state{reqIdx = ReqId+1},
 
 	% Send the request to the relay and finish with a pending reply
-	case iris_proto:send_request(Sock, ReqId, App, Request, Timeout) of
+	case iris_proto:send_request(Sock, ReqId, Cluster, Request, Timeout) of
 		ok    -> {noreply, NewState};
 		Error ->
 			ets:delete(State#state.reqPend, ReqId),
@@ -214,14 +221,14 @@ handle_call(close, From, State = #state{sock = Sock}) ->
 	end;
 
 %% Relays a tunneling request to the Iris node, waiting async with for the reply.
-handle_call({tunnel, App, Timeout}, From, State = #state{sock = Sock}) ->
+handle_call({tunnel, Cluster, Timeout}, From, State = #state{sock = Sock}) ->
 	% Create a result channel for the tunneling reply
 	TunId = State#state.tunIdx,
 	true = ets:insert_new(State#state.tunPend, {TunId, From}),
 	NewState = State#state{tunIdx = TunId+1},
 
 	% Send the request to the relay and finish with a pending reply
-	case iris_proto:send_tunnel_request(Sock, TunId, App, iris_tunnel:buffer(), Timeout) of
+	case iris_proto:send_tunnel_request(Sock, TunId, Cluster, iris_tunnel:buffer(), Timeout) of
 		ok    -> {noreply, NewState};
 		Error ->
 			ets:delete(State#state.tunPend, TunId),
@@ -242,7 +249,7 @@ handle_call({tunnel_close, TunId}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:send_tunnel_close(Sock, TunId), State}.
 
 %% Delivers a reply to a pending request.
-handle_info({reply, ReqId, Reply}, State) ->
+handle_cast({reply, ReqId, Reply}, State) ->
 	% Fetch the result channel and remove from state
 	{ReqId, Pending} = hd(ets:lookup(State#state.reqPend, ReqId)),
 	ets:delete(State#state.reqPend, ReqId),
@@ -252,7 +259,7 @@ handle_info({reply, ReqId, Reply}, State) ->
 	{noreply, State};
 
 %% Delivers a published event if the subscription is still alive.
-handle_info({publish, Topic, Event}, State) ->
+handle_cast({publish, Topic, Event}, State) ->
 	% Make sure the subscription existed in the first hand
 	case ets:member(State#state.subLive, Topic) of
 		true  -> State#state.handler ! {publish, Topic, Event};
@@ -263,7 +270,7 @@ handle_info({publish, Topic, Event}, State) ->
 %% Accepts an incoming tunneling request from a remote app, assembling a local
 %% tunnel with the given send window and replies to the relay with the final
 %% permanent tunnel id.
-handle_info({tunnel_request, TmpId, Buffer}, State = #state{sock = Sock}) ->
+handle_cast({tunnel_request, TmpId, Buffer}, State = #state{sock = Sock}) ->
 	% Create the local tunnel endpoint
 	TunId = State#state.tunIdx,
 	{ok, Tunnel} = gen_server:start(iris_tunnel, {self(), TunId, Buffer}, []),
@@ -277,7 +284,7 @@ handle_info({tunnel_request, TmpId, Buffer}, State = #state{sock = Sock}) ->
 	{noreply, State#state{tunIdx = TunId+1}};
 
 % Delivers a reply to a pending tunneling request.
-handle_info({tunnel_reply, TunId, Reply}, State) ->
+handle_cast({tunnel_reply, TunId, Reply}, State) ->
 	% Fetch the result channel and remove from state
 	{TunId, Pending} = hd(ets:lookup(State#state.tunPend, TunId)),
 	ets:delete(State#state.tunPend, TunId),
@@ -298,13 +305,13 @@ handle_info({tunnel_reply, TunId, Reply}, State) ->
 	{noreply, State};
 
 % Delivers a data packet to a specific tunnel.
-handle_info({tunnel_data, TunId, Message}, State) ->
+handle_cast({tunnel_data, TunId, Message}, State) ->
 	{TunId, Tunnel} = hd(ets:lookup(State#state.tunLive, TunId)),
 	Tunnel ! {data, Message},
 	{noreply, State};
 
 % Delivers a data acknowledgment to a specific tunnel.
-handle_info({tunnel_ack, TunId}, State) ->
+handle_cast({tunnel_ack, TunId}, State) ->
 	case ets:lookup(State#state.tunLive, TunId) of
 		[{TunId, Tunnel}] -> Tunnel ! ack;
 		[]                -> ok
@@ -312,12 +319,12 @@ handle_info({tunnel_ack, TunId}, State) ->
 	{noreply, State};
 
 %% Closes a tunnel connection, removing it from the local state.
-handle_info({tunnel_close, TunId}, State) ->
+handle_cast({tunnel_close, TunId}, State) ->
 	{TunId, Tunnel} = hd(ets:lookup(State#state.tunLive, TunId)),
   ets:delete(State#state.tunLive, TunId),
 
   Tunnel ! close,
-  {noreply, State};
+  {noreply, State}.
 
 %% Handles the termination of the receiver thread: either returns a clean exit
 %% or notifies the handler of a drop.
@@ -353,6 +360,3 @@ terminate(_Reason, State) ->
 
 code_change(_OldVsn, _State, _Extra) ->
 	{error, unimplemented}.
-
-handle_cast(_Request, State) ->
-	{stop, unimplemented, State}.
