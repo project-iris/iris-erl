@@ -228,10 +228,10 @@
 %% Iris server behavior definitions
 %% =============================================================================
 
--callback init(Args :: term()) ->
+-callback init(Conn :: pid(), Args :: term()) ->
 	{ok, State :: term()} | {stop, Reason :: term()}.
 
--callback handle_broadcast(Message :: binary(), State :: term(), Conn :: iris:connection()) ->
+-callback handle_broadcast(Message :: binary(), State :: term()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
 -callback handle_request(Request :: binary(), From :: iris:sender(), State :: term(), Conn :: iris:connection()) ->
@@ -380,12 +380,12 @@ stop(Server) ->
 %% @private
 %% Initializes the callback handler and connects to the local Iris relay node.
 init({Port, Cluster, Module, Args}) ->
-  % Initialize the callback handler
-	case Module:init(Args) of
-		{ok, State} ->
-			% Initialize the Iris connection
-			case iris_conn:register(Port, lists:flatten(Cluster), self()) of
-				{ok, Conn} ->
+	% Initialize the Iris connection
+	case iris_conn:register(Port, lists:flatten(Cluster), self()) of
+		{ok, Conn} ->
+		  % Initialize the callback handler
+			case Module:init(Conn, Args) of
+				{ok, State} ->
 					{ok, #state{
 						conn       = Conn,
 						hand_mod   = Module,
@@ -393,7 +393,7 @@ init({Port, Cluster, Module, Args}) ->
 					}};
 				{error, Reason} -> {stop, Reason}
 			end;
-		Error -> Error
+		{error, Reason} -> {stop, Reason}
 	end.
 
 %% @private
@@ -403,14 +403,14 @@ handle_call(stop, _From, State = #state{conn = Conn}) ->
 
 %% @private
 %% Delivers a broadcast message to the callback and processes the result.
-handle_info({broadcast, Message}, State = #state{conn = Conn, hand_mod = Mod}) ->
-	case Mod:handle_broadcast(Message, State#state.hand_state, Conn) of
+handle_info({handle_broadcast, Message}, State = #state{hand_mod = Mod}) ->
+	case Mod:handle_broadcast(Message, State#state.hand_state) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
 	end;
 
 %% Delivers a request to the callback and processes the result.
-handle_info({request, From, Request}, State = #state{conn = Conn, hand_mod = Mod}) ->
+handle_info({handle_request, From, Request}, State = #state{conn = Conn, hand_mod = Mod}) ->
 	case Mod:handle_request(Request, From, State#state.hand_state, Conn) of
 		{reply, Reply, NewState} ->
 			ok = iris:reply(From, Reply),
@@ -451,7 +451,7 @@ terminate(Reason, State = #state{conn = Conn, hand_mod = Mod}) ->
 	Mod:terminate(Reason, State#state.hand_state),
 	case Conn of
 		nil -> ok;
-		_   -> iris:close(Conn)
+		_   -> iris_conn:close(Conn)
 	end.
 
 %% =============================================================================

@@ -63,8 +63,7 @@ close(Connection) ->
 
 
 %% Forwards a broadcast message for relaying.
--spec broadcast(Connection :: pid(), Cluster :: string(), Message :: binary()) ->
-	ok | {error, Reason :: atom()}.
+-spec broadcast(Connection :: pid(), Cluster :: string(), Message :: binary()) ->	ok.
 
 broadcast(Connection, Cluster, Message) ->
 	gen_server:call(Connection, {broadcast, lists:flatten(Cluster), Message}, infinity).

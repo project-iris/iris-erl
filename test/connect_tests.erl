@@ -33,6 +33,6 @@ connect_test() ->
 		end)
 	end, lists:seq(1, ConfClients)),
 
-	%% Schedule the parallel operations
+	% Schedule the parallel operations
 	ok = iris_barrier:wait(Barrier),
 	ok = iris_barrier:wait(Barrier).

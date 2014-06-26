@@ -9,7 +9,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -behaviour(iris_server).
--export([init/1, handle_broadcast/3, handle_request/4, handle_publish/4,
+-export([init/2, handle_broadcast/2, handle_request/4, handle_publish/4,
 	handle_tunnel/3, handle_drop/2, terminate/2]).
 
 %% Local Iris node's listener port
@@ -119,7 +119,7 @@ multi_test() ->
 %% =============================================================================
 
 %% Simply saves the parent tester for reporting events.
-init(nil) -> {ok, nil}.
+init(_Conn, nil) -> {ok, nil}.
 
 %% Spawns a new process that echoes back all tunnel data.
 handle_tunnel(Tunnel, State, _Link) ->
@@ -143,7 +143,7 @@ terminate(_Reason, _State) -> ok.
 %% Unused Iris server callback methods (shuts the compiler up)
 %% =============================================================================
 
-handle_broadcast(_Message, State, _Link) ->
+handle_broadcast(_Message, State) ->
 	{stop, unimplemented, State}.
 
 handle_request(_Request, _From, State, _Link) ->

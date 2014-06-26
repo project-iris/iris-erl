@@ -7,11 +7,8 @@
 
 -module(iris_client).
 -export([start/1, start_link/1, stop/1]).
+-export([broadcast/3]).
 
-
-%% =============================================================================
-%% External API functions
-%% =============================================================================
 
 -spec start(Port :: pos_integer()) ->
 	{ok, Client :: pid()} | {error, Reason :: term()}.
@@ -29,3 +26,19 @@ start_link(Port) ->	iris_conn:connect_link(Port).
 	ok | {error, Reason :: term()}.
 
 stop(Client) ->	iris_conn:close(Client).
+
+
+%% @doc Broadcasts a message to all members of a cluster. No guarantees are made
+%%      that all recipients receive the message (best effort).
+%%
+%%      The call blocks until the message is forwarded to the local Iris node.
+%%
+%% @spec (Client, Cluster, Message) -> ok
+%%      Client  = pid()
+%%      Cluster = string()
+%%      Message = binary()
+%% @end
+-spec broadcast(Client :: pid(), Cluster :: string(), Message :: binary()) -> ok.
+
+broadcast(Client, Cluster, Message) ->
+	ok = iris_conn:broadcast(Client, Cluster, Message).

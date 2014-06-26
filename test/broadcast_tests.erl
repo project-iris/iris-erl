@@ -7,97 +7,107 @@
 
 -module(broadcast_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("configs.hrl").
 
 -behaviour(iris_server).
--export([init/1, handle_broadcast/3, handle_request/4, handle_publish/4,
+-export([init/2, handle_broadcast/2, handle_request/4, handle_publish/4,
 	handle_tunnel/3, handle_drop/2, terminate/2]).
 
-%% Local Iris node's listener port
--define(RELAY_PORT, 55555).
 
+%% Tests multiple concurrent client and service broadcasts.
+broadcast_test() ->
+  % Test specific configurations
+	ConfClients  = 25,
+	ConfServers  = 25,
+	ConfMessages = 25,
 
-%% =============================================================================
-%% Tests
-%% =============================================================================
+	Barrier = iris_barrier:new(ConfClients + ConfServers),
 
-%% Broadcasts to itself a handful of messages.
-single_test() ->
-	% Connect to the Iris network
-	{ok, Server, Link} = iris_server:start(?RELAY_PORT, "single", ?MODULE, self()),
-
-	% Broadcast a handfull of messages to onself
-	Count = 1000,
-	Messages = ets:new(broadcast, [set, private]),
-	lists:foreach(fun(_) ->
-		Msg = crypto:strong_rand_bytes(128),
-		true = ets:insert_new(Messages, {Msg}),
-		ok = iris:broadcast(Link, "single", Msg)
-	end, lists:seq(1, Count)),
-
-	% Retrieve and verify all broadcasts
-	lists:foreach(fun(_) ->
-		receive
-			Msg ->
-				[{Msg}] = ets:lookup(Messages, Msg),
-				ets:delete(Messages, Msg)
-		end
-	end, lists:seq(1, Count)),
-
-	% Close the Iris connection
-	ok = iris_server:stop(Server).
-
-%% Starts a numbef of concurrent processes, each broadcasting to the whole pool.
-multi_test() ->
-	Servers = 100,
-	Broadcasts = 25,
-
-	% Start up the concurrent broadcasters
-	lists:foreach(fun(_) ->
-		Parent = self(),
+	% Start up the concurrent broadcasting clients
+	lists:foreach(fun(Client) ->
 		spawn(fun() ->
-			% Start a single server and signal parent
-			{ok, Server, Link} = iris_server:start(?RELAY_PORT, "multi", ?MODULE, self()),
-			Parent ! {ok, self()},
+			try
+				% Connect to the local relay
+				{ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+				iris_barrier:sync(Barrier),
 
-			% Wait for permission to continue
-			receive
-				cont -> ok
-			end,
+				% Broadcast to the whole service cluster
+				lists:foreach(fun(Index) ->
+					Message = io_lib:format("client #~p, broadcast ~p", [Client, Index]),
+					ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, list_to_binary(Message))
+				end, lists:seq(1, ConfMessages)),
+				iris_barrier:sync(Barrier),
 
-			% Broadcast the whole group
-			lists:foreach(fun(_) ->
-				ok = iris:broadcast(Link, "multi", <<"BROADCAST">>)
-			end, lists:seq(1, Broadcasts)),
-
-			% Retrieve and verify all broadcasts
-			lists:foreach(fun(_) ->
-				receive
-					<<"BROADCAST">> -> ok
-				end
-			end, lists:seq(1, Servers * Broadcasts)),
-
-			% Terminate the server and signal parent
-			ok = iris_server:stop(Server),
-			Parent ! done
+				% Disconnect from the local relay
+				ok = iris_client:stop(Conn),
+				iris_barrier:exit(Barrier)
+			catch
+				Exception -> iris_barrier:exit(Exception), ok
+			end
 		end)
-	end, lists:seq(1, Servers)),
+	end, lists:seq(1, ConfClients)),
 
-	% Wait for all the inits
-	Pids = lists:map(fun(_) ->
-		receive
-			{ok, Pid} -> Pid
-		end
-	end, lists:seq(1, Servers)),
+	% Start up the concurrent broadcast services
+	lists:foreach(fun(Service) ->
+		spawn(fun() ->
+			try
+				% Register a new service to the relay
+				{ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+				Conn = receive
+					{ok, Client} -> Client
+				end,
+				iris_barrier:sync(Barrier),
 
-	% Permit all servers to begin broadcast
-	lists:foreach(fun(Pid) -> Pid ! cont end, Pids),
+				% Broadcast to the whole service cluster
+				lists:foreach(fun(Index) ->
+					Message = io_lib:format("server #~p, broadcast ~p", [Service, Index]),
+					ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, list_to_binary(Message))
+				end, lists:seq(1, ConfMessages)),
+				iris_barrier:sync(Barrier),
 
-	% Wait for all the terminations (big timeout)
-	lists:foreach(fun(_) ->
-		receive
-			done -> ok
-		end
-	end, lists:seq(1, Servers)).
+				% Retrieve all the arrived broadcasts
+				Messages = ets:new(messages, [set, private]),
+				lists:foreach(fun(_) ->
+					receive 
+						Binary -> ets:insert_new(Messages, {Binary})
+					end
+				end, lists:seq(1, (ConfClients + ConfServers) * ConfMessages)),
+
+				% Verify all the individual broadcasts
+				lists:foreach(fun(ClientId) ->
+					lists:foreach(fun(Index) ->
+						Message = io_lib:format("client #~p, broadcast ~p", [ClientId, Index]),
+						Binary  = list_to_binary(Message),
+						true = ets:member(Messages, Binary),
+						true = ets:delete(Messages, Binary)
+					end, lists:seq(1, ConfMessages))
+				end, lists:seq(1, ConfClients)),
+
+				lists:foreach(fun(ServiceId) ->
+					lists:foreach(fun(Index) ->
+						Message = io_lib:format("server #~p, broadcast ~p", [ServiceId, Index]),
+						Binary  = list_to_binary(Message),
+						true = ets:member(Messages, Binary),
+						true = ets:delete(Messages, Binary)
+					end, lists:seq(1, ConfMessages))
+				end, lists:seq(1, ConfServers)),
+
+				iris_barrier:sync(Barrier),
+
+				% Unregister the service
+				ok = iris_server:stop(Server),
+				iris_barrier:exit(Barrier)
+			catch
+				Exception -> iris_barrier:exit(Exception), ok
+			end
+		end)
+	end, lists:seq(1, ConfServers)),
+
+	% Schedule the parallel operations
+	ok = iris_barrier:wait(Barrier),
+	ok = iris_barrier:wait(Barrier),
+	ok = iris_barrier:wait(Barrier),
+	ok = iris_barrier:wait(Barrier).
 
 
 %% =============================================================================
@@ -105,10 +115,12 @@ multi_test() ->
 %% =============================================================================
 
 %% Simply saves the parent tester for reporting events.
-init(Parent) -> {ok, Parent}.
+init(Conn, Parent) ->
+	Parent ! {ok, Conn},
+	{ok, Parent}.
 
 %% Handles a broadcast event by reporting it to the tester process.
-handle_broadcast(Message, Parent, _Link) ->
+handle_broadcast(Message, Parent) ->
 	Parent ! Message,
 	{noreply, Parent}.
 
