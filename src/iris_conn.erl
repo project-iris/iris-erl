@@ -8,8 +8,9 @@
 %% @private
 
 -module(iris_conn).
--export([connect/1, register/3, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
-	unsubscribe/2, tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2, close/1]).
+-export([connect/1, connect_link/1, register/3, register_link/3, close/1,
+	broadcast/3, request/4, reply/2, subscribe/2, publish/3, unsubscribe/2,
+	tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2]).
 
 -export([handle_broadcast/2, handle_request/5]).
 
@@ -30,12 +31,28 @@ connect(Port) ->
 	gen_server:start(?MODULE, {Port, "", nil}, []).
 
 
+%% Starts the gen_server responsible for a client connection and links it.
+-spec connect_link(Port :: pos_integer()) ->
+	{ok, Connection :: pid()} | {error, Reason :: atom()}.
+
+connect_link(Port) ->
+	gen_server:start_link(?MODULE, {Port, "", nil}, []).
+
+
 %% Starts the gen_server responsible for a service connection.
 -spec register(Port :: pos_integer(), Cluster :: string(), Handler :: pid()) ->
   {ok, Connection :: pid()} | {error, Reason :: atom()}.
 
 register(Port, Cluster, Handler) ->
   gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler}, []).
+
+
+%% Starts the gen_server responsible for a service connection.
+-spec register_link(Port :: pos_integer(), Cluster :: string(), Handler :: pid()) ->
+  {ok, Connection :: pid()} | {error, Reason :: atom()}.
+
+register_link(Port, Cluster, Handler) ->
+  gen_server:start_link(?MODULE, {Port, lists:flatten(Cluster), Handler}, []).
 
 
 %% Notifies the relay server of a graceful close request.
@@ -109,7 +126,7 @@ tunnel_send(Connection, TunId, Message) ->
 	gen_server:call(Connection, {tunnel_send, TunId, Message}, infinity).
 
 
-%% Forwards a tunnel data acknowledgement to the relay.
+%% Forwards a tunnel data acknowledgment to the relay.
 -spec tunnel_ack(Connection :: pid(), TunId :: non_neg_integer()) ->
 	ok | {error, Reason :: atom()}.
 

@@ -199,7 +199,8 @@ recv_varint(Socket) ->
 
 recv_binary(Socket) ->
 	case recv_varint(Socket) of
-		{ok, Size} -> gen_tcp:recv(Socket, Size);
+		{ok, 0}    -> {ok, <<"">>};
+		{ok, Size} ->	gen_tcp:recv(Socket, Size);
 		Error      -> Error
 	end.
 
@@ -245,8 +246,7 @@ proc_init(Socket) ->
 -spec proc_close(Socket :: port()) ->	{ok, Reason :: [byte()]}.
 
 proc_close(Socket) ->
-	{ok, Reason} = recv_string(Socket),
-	{ok, Reason}.
+	{ok, Reason} = recv_string(Socket).
 
 %% Retrieves an application broadcast delivery.
 -spec proc_broadcast(Socket :: port(), Handler :: pid()) -> ok.

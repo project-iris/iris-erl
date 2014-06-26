@@ -64,10 +64,10 @@
 %%
 %%      === handle_broadcast/3 ===
 %%      ```
-%%      handle_broadcast(Message, State, Link) -> {noreply, NewState} | {stop, Reason, NewState}
+%%      handle_broadcast(Message, State, Conn) -> {noreply, NewState} | {stop, Reason, NewState}
 %%          Message  = binary()
 %%          State    = term()
-%%          Link     = iris:connection()
+%%          Conn     = iris:connection()
 %%          NewState = term()
 %%          Reason   = term()
 %%      '''
@@ -77,7 +77,7 @@
 %%      <ul>
 %%        <li>`Message' is the `Message' argument provided to `broadcast'.</li>
 %%        <li>`State' is the internal state of the iris_server.</li>
-%%        <li>`Link' is the relay connection to the Iris network if the handler
+%%        <li>`Conn' is the relay connection to the Iris network if the handler
 %%            needs additional communication.</li>
 %%      </ul><ul>
 %%        <li>If the function returns `{noreply, NewState}', the iris_server
@@ -88,13 +88,13 @@
 %%
 %%      === handle_request/4 ===
 %%      ```
-%%      handle_request(Request, From, State, Link) ->
+%%      handle_request(Request, From, State, Conn) ->
 %%              {reply, Reply, NewState} | {noreply, NewState} |
 %%              {stop, Reason, Reply, NewState} | {stop, Reason, NewState} |
 %%          Request  = binary()
 %%          From     = iris:sender()
 %%          State    = term()
-%%          Link     = iris:connection()
+%%          Conn     = iris:connection()
 %%          Reply    = binary()
 %%          NewState = term()
 %%          Reason   = term()
@@ -107,7 +107,7 @@
 %%        <li>`From' is the sender address used by {@link iris:reply/2} to send
 %%            an asynchronous reply back.</li>
 %%        <li>`State' is the internal state of the iris_server.</li>
-%%        <li>`Link' is the relay connection to the Iris network if the handler
+%%        <li>`Conn' is the relay connection to the Iris network if the handler
 %%            needs additional communication.</li>
 %%      </ul><ul>
 %%        <li>If the function returns `{reply, Reply, NewState}', the `Reply'
@@ -124,11 +124,11 @@
 %%
 %%      === handle_publish/4 ===
 %%      ```
-%%      handle_publish(Topic, Event, State, Link) -> {noreply, NewState} | {stop, Reason, NewState}
+%%      handle_publish(Topic, Event, State, Conn) -> {noreply, NewState} | {stop, Reason, NewState}
 %%          Topic    = [byte()]
 %%          Event    = binary()
 %%          State    = term()
-%%          Link     = iris:connection()
+%%          Conn     = iris:connection()
 %%          NewState = term()
 %%          Reason   = term()
 %%      '''
@@ -139,7 +139,7 @@
 %%        <li>`Topic' is the `Topic' argument provided to `publish'.</li>
 %%        <li>`Event' is the `Event' argument provided to `publish'.</li>
 %%        <li>`State' is the internal state of the iris_server.</li>
-%%        <li>`Link' is the relay connection to the Iris network if the handler
+%%        <li>`Conn' is the relay connection to the Iris network if the handler
 %%            needs additional communication.</li>
 %%      </ul><ul>
 %%        <li>If the function returns `{noreply, NewState}', the iris_server
@@ -150,10 +150,10 @@
 %%
 %%      === handle_tunnel/3 ===
 %%      ```
-%%      handle_tunnel(Tunnel, State, Link) -> {noreply, NewState} | {stop, Reason, NewState}
+%%      handle_tunnel(Tunnel, State, Conn) -> {noreply, NewState} | {stop, Reason, NewState}
 %%          Topic    = iris:tunnel()
 %%          State    = term()
-%%          Link     = iris:connection()
+%%          Conn     = iris:connection()
 %%          NewState = term()
 %%          Reason   = term()
 %%      '''
@@ -163,7 +163,7 @@
 %%      <ul>
 %%        <li>`Tunnel' is the Iris data stream used for ordered messaging.</li>
 %%        <li>`State' is the internal state of the iris_server.</li>
-%%        <li>`Link' is the relay connection to the Iris network if the handler
+%%        <li>`Conn' is the relay connection to the Iris network if the handler
 %%            needs additional communication.</li>
 %%      </ul><ul>
 %%        <li>If the function returns `{noreply, NewState}', the iris_server
@@ -218,30 +218,30 @@
 %% @end
 
 -module(iris_server).
--export([start/4, start_link/4, stop/1]).
+-export([start/4, start/5, start_link/4, start_link/5, stop/1]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
 	code_change/3]).
 
 %% =============================================================================
-%% Iris server behaviour definitions
+%% Iris server behavior definitions
 %% =============================================================================
 
 -callback init(Args :: term()) ->
 	{ok, State :: term()} | {stop, Reason :: term()}.
 
--callback handle_broadcast(Message :: binary(), State :: term(), Link :: iris:connection()) ->
+-callback handle_broadcast(Message :: binary(), State :: term(), Conn :: iris:connection()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
--callback handle_request(Request :: binary(), From :: iris:sender(), State :: term(), Link :: iris:connection()) ->
+-callback handle_request(Request :: binary(), From :: iris:sender(), State :: term(), Conn :: iris:connection()) ->
 	{reply, Reply :: binary(), NewState :: term()} | {noreply, NewState :: term()} |
 	{stop, Reply :: binary(), Reason :: term(), NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
--callback handle_publish(Topic :: string(), Event :: binary(), State :: term(), Link :: iris:connection()) ->
+-callback handle_publish(Topic :: string(), Event :: binary(), State :: term(), Conn :: iris:connection()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
--callback handle_tunnel(Tunnel :: iris:tunnel(), State :: term(), Link :: iris:connection()) ->
+-callback handle_tunnel(Tunnel :: iris:tunnel(), State :: term(), Conn :: iris:connection()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
 -callback handle_drop(Reason :: term(), State :: term()) ->
@@ -255,6 +255,13 @@
 %% External API functions
 %% =============================================================================
 
+-spec start(Port :: pos_integer(), Cluster :: string(), Module :: atom(), Args :: term()) ->
+	{ok, Server :: pid()} | {error, Reason :: term()}.
+
+start(Port, Cluster, Module, Args) ->
+	start(Port, Cluster, Module, Args, []).
+
+
 %% @doc Creates and starts an Iris server process.
 %%
 %%      The server will connect to the locally running Iris relay, and receive
@@ -263,7 +270,7 @@
 %%      <ul>
 %%        <li>`Port' is the local TCP endpoint on which the Iris relay is
 %%             listening.</li>
-%%        <li>`App' is the application group the server wishes to join.</li>
+%%        <li>`Cluster' is the application group the server wishes to join.</li>
 %%        <li>`Module' is the name of the callback module</li>
 %%        <li>`Args' is an arbitrary term provided to `Module:init/1'</li>
 %%      </ul><ul>
@@ -276,25 +283,29 @@
 %%            cannot be made, the method returns with `{error, Reason}'.</li>
 %%      </ul>
 %%
-%% @spec (Port, App, Module, Args) -> {ok, Server, Connection} | {error, Reason}
+%% @spec (Port, Cluster, Module, Args, Options) -> {ok, Server, Connection} | {error, Reason}
 %%      Port       = pos_integer()
-%%      App        = string()
+%%      Cluster        = string()
 %%      Module     = atom()
 %%      Args       = term()
 %%      Server     = pid()
 %%      Connection = connection()
 %%      Reason     = atom()
 %% @end
--spec start(Port :: pos_integer(), App :: string(), Module :: atom(), Args :: term()) ->
-	{ok, Server :: pid(), Connection :: iris:connection()} | {error, Reason :: atom()}.
+-spec start(Port :: pos_integer(), Cluster :: string(), Module :: atom(),
+	Args :: term(), Options :: [{atom(), term()}]) ->
+	{ok, Server :: pid()} | {error, Reason :: term()}.
 
-start(Port, App, Module, Args) ->
-	case gen_server:start(?MODULE, {Port, App, Module, Args}, []) of
-		{ok, Pid} ->
-			{ok, Link} = gen_server:call(Pid, link, infinity),
-			{ok, Pid, Link};
-		Other -> Other
-	end.
+start(Port, Cluster, Module, Args, Options) ->
+	gen_server:start(?MODULE, {Port, Cluster, Module, Args}, []).
+
+
+-spec start_link(Port :: pos_integer(), Cluster :: string(), Module :: atom(), Args :: term()) ->
+	{ok, Server :: pid()} | {error, Reason :: term()}.
+
+start_link(Port, Cluster, Module, Args) ->
+	start_link(Port, Cluster, Module, Args, []).
+
 
 %% @doc Creates and starts an Iris server process, linked to the caller.
 %%
@@ -304,7 +315,7 @@ start(Port, App, Module, Args) ->
 %%      <ul>
 %%        <li>`Port' is the local TCP endpoint on which the Iris relay is
 %%             listening.</li>
-%%        <li>`App' is the application group the server wishes to join.</li>
+%%        <li>`Cluster' is the application group the server wishes to join.</li>
 %%        <li>`Module' is the name of the callback module</li>
 %%        <li>`Args' is an arbitrary term provided to `Module:init/1'</li>
 %%      </ul><ul>
@@ -317,25 +328,22 @@ start(Port, App, Module, Args) ->
 %%            cannot be made, the method returns with `{error, Reason}'.</li>
 %%      </ul>
 %%
-%% @spec (Port, App, Module, Args) -> {ok, Server, Connection} | {error, Reason}
+%% @spec (Port, Cluster, Module, Args, Options) -> {ok, Server, Connection} | {error, Reason}
 %%      Port       = pos_integer()
-%%      App        = string()
+%%      Cluster        = string()
 %%      Module     = atom()
 %%      Args       = term()
 %%      Server     = pid()
 %%      Connection = connection()
 %%      Reason     = atom()
 %% @end
--spec start_link(Port :: pos_integer(), App :: string(), Module :: atom(), Args :: term()) ->
-	{ok, Server :: pid(), Connection :: iris:connection()} | {error, Reason :: atom()}.
+-spec start_link(Port :: pos_integer(), Cluster :: string(), Module :: atom(),
+	Args :: term(), Options :: [{atom(), term()}]) ->
+	{ok, Server :: pid()} | {error, Reason :: term()}.
 
-start_link(Port, App, Module, Args) ->
-	case gen_server:start_link(?MODULE, {Port, App, Module, Args}, []) of
-		{ok, Pid} ->
-			{ok, Link} = gen_server:call(Pid, link, infinity),
-			{ok, Pid, Link};
-		Other -> Other
-	end.
+start_link(Port, Cluster, Module, Args, Options) ->
+	gen_server:start_link(?MODULE, {Port, Cluster, Module, Args}, []).
+
 
 %% @doc Gracefully terminates the server process.
 %%
@@ -348,7 +356,7 @@ start_link(Port, App, Module, Args) ->
 %%      Reason     = atom()
 %% @end
 -spec stop(Server :: pid()) ->
-	ok | {error, Reason :: atom()}.
+	ok | {error, Reason :: term()}.
 
 stop(Server) ->
 	gen_server:call(Server, stop).
@@ -359,7 +367,7 @@ stop(Server) ->
 %% =============================================================================
 
 -record(state, {
-	link,       %% High level Iris connection
+	conn,       %% High level Iris connection
   hand_mod,   %% Handler callback module
   hand_state  %% Handler internal state
 }).
@@ -369,46 +377,41 @@ stop(Server) ->
 %% Generic server callback methods
 %% =============================================================================
 
-%% Initializes the callback handler and connects to the local Iris relay node.
 %% @private
-init({Port, App, Module, Args}) ->
+%% Initializes the callback handler and connects to the local Iris relay node.
+init({Port, Cluster, Module, Args}) ->
   % Initialize the callback handler
-	Result = Module:init(Args),
-	case Result of
-		{stop, _}   -> Result;
+	case Module:init(Args) of
 		{ok, State} ->
 			% Initialize the Iris connection
-			case iris:connect(Port, App, self()) of
-				{ok, Link} ->
+			case iris_conn:register(Port, lists:flatten(Cluster), self()) of
+				{ok, Conn} ->
 					{ok, #state{
-						link       = Link,
+						conn       = Conn,
 						hand_mod   = Module,
 						hand_state = State
 					}};
 				{error, Reason} -> {stop, Reason}
-			end
+			end;
+		Error -> Error
 	end.
 
 %% @private
-%% Returns the Iris connection. Used only during server startup.
-handle_call(link, _From, State = #state{link = Link}) ->
-	{reply, {ok, Link}, State};
-
 %% Closes the Iris connection, returning the result to the caller.
-handle_call(stop, _From, State = #state{link = Link}) ->
-	{stop, normal, iris:close(Link), State#state{link = nil}}.
+handle_call(stop, _From, State = #state{conn = Conn}) ->
+	{stop, normal, iris_conn:close(Conn), State#state{conn = nil}}.
 
 %% @private
 %% Delivers a broadcast message to the callback and processes the result.
-handle_info({broadcast, Message}, State = #state{link = Link, hand_mod = Mod}) ->
-	case Mod:handle_broadcast(Message, State#state.hand_state, Link) of
+handle_info({broadcast, Message}, State = #state{conn = Conn, hand_mod = Mod}) ->
+	case Mod:handle_broadcast(Message, State#state.hand_state, Conn) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
 	end;
 
 %% Delivers a request to the callback and processes the result.
-handle_info({request, From, Request}, State = #state{link = Link, hand_mod = Mod}) ->
-	case Mod:handle_request(Request, From, State#state.hand_state, Link) of
+handle_info({request, From, Request}, State = #state{conn = Conn, hand_mod = Mod}) ->
+	case Mod:handle_request(Request, From, State#state.hand_state, Conn) of
 		{reply, Reply, NewState} ->
 			ok = iris:reply(From, Reply),
 			{noreply, State#state{hand_state = NewState}};
@@ -422,33 +425,33 @@ handle_info({request, From, Request}, State = #state{link = Link, hand_mod = Mod
 	end;
 
 %% Delivers a publish event to the callback and processes the result.
-handle_info({publish, Topic, Event}, State = #state{link = Link, hand_mod = Mod}) ->
-	case Mod:handle_publish(Topic, Event, State#state.hand_state, Link) of
+handle_info({publish, Topic, Event}, State = #state{conn = Conn, hand_mod = Mod}) ->
+	case Mod:handle_publish(Topic, Event, State#state.hand_state, Conn) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
 	end;
 
 %% Delivers an inbound tunnel to the callback and processes the result.
-handle_info({tunnel, Tunnel}, State = #state{link = Link, hand_mod = Mod}) ->
-	case Mod:handle_tunnel(Tunnel, State#state.hand_state, Link) of
+handle_info({tunnel, Tunnel}, State = #state{conn = Conn, hand_mod = Mod}) ->
+	case Mod:handle_tunnel(Tunnel, State#state.hand_state, Conn) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
 	end;
 
 %% Notifies the callback of the connection drop and processes the result.
-handle_info({drop, Reason}, State = #state{link = Link, hand_mod = Mod}) ->
-	case Mod:handle_drop(Reason, State#state.hand_state, Link) of
+handle_info({drop, Reason}, State = #state{conn = Conn, hand_mod = Mod}) ->
+	case Mod:handle_drop(Reason, State#state.hand_state, Conn) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
 	end.
 
 %% @private
 %% Notifies the callback of the termination and closes the link if still up.
-terminate(Reason, State = #state{link = Link, hand_mod = Mod}) ->
+terminate(Reason, State = #state{conn = Conn, hand_mod = Mod}) ->
 	Mod:terminate(Reason, State#state.hand_state),
-	case Link of
+	case Conn of
 		nil -> ok;
-		_   -> iris:close(Link)
+		_   -> iris:close(Conn)
 	end.
 
 %% =============================================================================
