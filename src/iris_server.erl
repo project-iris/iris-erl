@@ -224,6 +224,10 @@
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
 	code_change/3]).
 
+-define(DEFAULT_BROADCAST_MEMORY_LIMIT, 64 * 1024 * 1024).
+-define(DEFAULT_REQUEST_MEMORY_LIMIT, 64 * 1024 * 1024).
+
+
 %% =============================================================================
 %% Iris server behavior definitions
 %% =============================================================================
@@ -297,7 +301,7 @@ start(Port, Cluster, Module, Args) ->
 	{ok, Server :: pid()} | {error, Reason :: term()}.
 
 start(Port, Cluster, Module, Args, Options) ->
-	gen_server:start(?MODULE, {Port, Cluster, Module, Args}, []).
+	gen_server:start(?MODULE, {Port, Cluster, Module, Args, Options}, []).
 
 
 -spec start_link(Port :: pos_integer(), Cluster :: string(), Module :: atom(), Args :: term()) ->
@@ -342,7 +346,7 @@ start_link(Port, Cluster, Module, Args) ->
 	{ok, Server :: pid()} | {error, Reason :: term()}.
 
 start_link(Port, Cluster, Module, Args, Options) ->
-	gen_server:start_link(?MODULE, {Port, Cluster, Module, Args}, []).
+	gen_server:start_link(?MODULE, {Port, Cluster, Module, Args, Options}, []).
 
 
 %% @doc Gracefully terminates the server process.
@@ -379,9 +383,20 @@ stop(Server) ->
 
 %% @private
 %% Initializes the callback handler and connects to the local Iris relay node.
-init({Port, Cluster, Module, Args}) ->
+init({Port, Cluster, Module, Args, Options}) ->
+  % Load the service limits (or defaults)
+  BroadcastMemory = case proplists:lookup(broadcast_memory, Options) of
+    none                       -> ?DEFAULT_BROADCAST_MEMORY_LIMIT;
+    {broadcast_memory, BLimit} -> BLimit
+  end,
+  RequestMemory = case proplists:lookup(request_memory, Options) of
+    none                     -> ?DEFAULT_REQUEST_MEMORY_LIMIT;
+    {request_memory, RLimit} -> RLimit
+  end,
+  ServiceLimits = {BroadcastMemory, RequestMemory},
+
 	% Initialize the Iris connection
-	case iris_conn:register(Port, lists:flatten(Cluster), self()) of
+	case iris_conn:register(Port, lists:flatten(Cluster), self(), ServiceLimits) of
 		{ok, Conn} ->
 		  % Initialize the callback handler
 			case Module:init(Conn, Args) of

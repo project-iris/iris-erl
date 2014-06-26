@@ -8,7 +8,7 @@
 %% @private
 
 -module(iris_conn).
--export([connect/1, connect_link/1, register/3, register_link/3, close/1,
+-export([connect/1, connect_link/1, register/4, register_link/3, close/1,
 	broadcast/3, request/4, reply/2, subscribe/2, publish/3, unsubscribe/2,
 	tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2]).
 
@@ -28,7 +28,7 @@
 	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
 connect(Port) ->
-	gen_server:start(?MODULE, {Port, "", nil}, []).
+	gen_server:start(?MODULE, {Port, "", nil, {0, 0}}, []).
 
 
 %% Starts the gen_server responsible for a client connection and links it.
@@ -36,15 +36,16 @@ connect(Port) ->
 	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
 connect_link(Port) ->
-	gen_server:start_link(?MODULE, {Port, "", nil}, []).
+	gen_server:start_link(?MODULE, {Port, "", nil, {0, 0}}, []).
 
 
 %% Starts the gen_server responsible for a service connection.
--spec register(Port :: pos_integer(), Cluster :: string(), Handler :: pid()) ->
+-spec register(Port :: pos_integer(), Cluster :: string(),
+  Handler :: pid(), Limits :: {pos_integer(), pos_integer()}) ->
   {ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-register(Port, Cluster, Handler) ->
-  gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler}, []).
+register(Port, Cluster, Handler, Limits) ->
+  gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler, Limits}, []).
 
 
 %% Starts the gen_server responsible for a service connection.
@@ -186,7 +187,7 @@ handle_request(Limiter, Owner, Id, Request, Timeout) ->
 %% =============================================================================
 
 %% Connects to the locally running iris node and initiates the connection.
-init({Port, Cluster, Handler}) ->
+init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}}) ->
 	% Open the TCP connection
 	case gen_tcp:connect({127,0,0,1}, Port, [{active, false}, binary, {nodelay, true}]) of
 		{ok, Sock} ->
@@ -198,8 +199,8 @@ init({Port, Cluster, Handler}) ->
 						{ok, _Version} ->
 							% Spawn the mailbox limiter threads and message receiver
 							process_flag(trap_exit, true),
-              Broadcaster = iris_mailbox:start_link(Handler, broadcast, 64 * 1024),
-              Requester   = iris_mailbox:start_link(Handler, request, 64 * 1024),
+              Broadcaster = iris_mailbox:start_link(Handler, broadcast, BroadcastMemory),
+              Requester   = iris_mailbox:start_link(Handler, request, RequestMemory),
               _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester),
 
               % Assemble the internal state and return

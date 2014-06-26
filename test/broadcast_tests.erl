@@ -68,7 +68,7 @@ broadcast_test() ->
 				% Retrieve all the arrived broadcasts
 				Messages = ets:new(messages, [set, private]),
 				lists:foreach(fun(_) ->
-					receive 
+					receive
 						Binary -> ets:insert_new(Messages, {Binary})
 					end
 				end, lists:seq(1, (ConfClients + ConfServers) * ConfMessages)),
@@ -108,6 +108,34 @@ broadcast_test() ->
 	ok = iris_barrier:wait(Barrier),
 	ok = iris_barrier:wait(Barrier),
 	ok = iris_barrier:wait(Barrier).
+
+
+%% Tests the broadcast memory limitation.
+broadcast_memory_limit_test() ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self(), [{broadcast_memory, 1}]),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Check that a 1 byte broadcast passes
+  ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, <<0:8>>),
+  ok = receive
+    _ -> ok
+  after
+    1 -> timeout
+  end,
+
+  % Check that a 2 byte broadcast is dropped
+  ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, <<0:8>>),
+  ok = receive
+    _ -> not_dropped
+  after
+    1 -> ok
+  end,
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
 
 
 %% =============================================================================
