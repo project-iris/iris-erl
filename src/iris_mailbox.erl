@@ -14,11 +14,17 @@
 -module(iris_mailbox).
 -export([start_link/3, schedule/3, grant/2, limit/4]).
 
+
+%% =============================================================================
+%% External API functions
+%% =============================================================================
+
 %% Spawns a bounded mailbox forwarder and links it to the current process.
 -spec start_link(Owner :: pid(), Type :: atom(), Limit :: pos_integer()) -> pid().
 
 start_link(Owner, Type, Limit) ->
   spawn_link(?MODULE, limit, [Owner, Type, Limit, 0]).
+
 
 %% Schedules a message into the remote mailbox if and only if the associated
 %% space requirements can be satisfied.
@@ -28,12 +34,18 @@ schedule(Limiter, Size, Message) ->
   Limiter ! {schedule, Size, Message},
   ok.
 
+
 %% Grants additional space allowance to a bounded mailbox.
 -spec grant(Limiter :: pid(), Space :: non_neg_integer()) -> ok.
 
 grant(Limiter, Space) ->
   Limiter ! {grant, Space},
   ok.
+
+
+%% =============================================================================
+%% Internal API functions
+%% =============================================================================
 
 %% Forwards inbound messages to the owner's message queue, given that the total
 %% memory consumption is below a threshold. Discards otherwise.
