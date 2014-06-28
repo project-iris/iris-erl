@@ -218,7 +218,9 @@
 %% @end
 
 -module(iris_server).
--export([start/4, start/5, start_link/4, start_link/5, stop/1]).
+-export([start/4, start/5, start_link/4, start_link/5, stop/1, reply/2]).
+
+-export([handle_broadcast/2, handle_request/4]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
@@ -238,8 +240,8 @@
 -callback handle_broadcast(Message :: binary(), State :: term()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
--callback handle_request(Request :: binary(), From :: iris:sender(), State :: term(), Conn :: iris:connection()) ->
-	{reply, Reply :: binary(), NewState :: term()} | {noreply, NewState :: term()} |
+-callback handle_request(Request :: binary(), From :: iris:sender(), State :: term()) ->
+	{reply, {ok, Reply :: binary()} | {error, Reason :: term()}, NewState :: term()} | {noreply, NewState :: term()} |
 	{stop, Reply :: binary(), Reason :: term(), NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
 -callback handle_publish(Topic :: string(), Event :: binary(), State :: term(), Conn :: iris:connection()) ->
@@ -366,6 +368,58 @@ stop(Server) ->
 	gen_server:call(Server, stop).
 
 
+%% @doc This function can be used by an iris_server to explicitly send a reply
+%%      to a client that called request/4 when the reply cannot be defined in
+%%      the return value of Module:handle_request/3.
+%%
+%%      Client must be the From argument provided to the callback function.
+%%
+%% @spec (Client, Reply) -> ok | {error, Reason}
+%%      Client = sender()
+%%      Reply  = binary()
+%%      Reason = atom()
+%% @end
+-spec reply(Client :: term(), Reply :: binary()) ->
+  ok | {error, Reason :: atom()}.
+
+reply(Client, Reply) ->
+  iris_relay:reply(Client, Reply).
+
+
+%% =============================================================================
+%% Internal API callback functions
+%% =============================================================================
+
+%% @private
+%% Schedules an application broadcast for the service handler to process.
+-spec handle_broadcast(Limiter :: pid(), Message :: binary()) -> ok.
+
+handle_broadcast(Limiter, Message) ->
+  ok = iris_mailbox:schedule(Limiter, byte_size(Message), {handle_broadcast, Message}).
+
+
+%% @private
+%% Schedules an application request for the service handler to process.
+-spec handle_request(Limiter :: pid(), Id :: non_neg_integer(), Request :: binary(),
+  Timeout :: pos_integer()) -> ok.
+
+handle_request(Limiter, Id, Request, Timeout) ->
+  Expiry = timestamp() + Timeout * 1000,
+  ok = iris_mailbox:schedule(Limiter, byte_size(Request), {handle_request, Id, Request, Expiry}).
+
+
+%% =============================================================================
+%% Internal helper functions
+%% =============================================================================
+
+%% Get the current monotonic (erlanbg:now) timer's timestamp.
+-spec timestamp() -> pos_integer().
+
+timestamp() ->
+  {Mega, Secs, Micro} = erlang:now(),
+  Mega*1000*1000*1000*1000 + Secs * 1000 * 1000 + Micro.
+
+
 %% =============================================================================
 %% Generic server internal state
 %% =============================================================================
@@ -425,18 +479,23 @@ handle_info({handle_broadcast, Message}, State = #state{hand_mod = Mod}) ->
 	end;
 
 %% Delivers a request to the callback and processes the result.
-handle_info({handle_request, From, Request}, State = #state{conn = Conn, hand_mod = Mod}) ->
-	case Mod:handle_request(Request, From, State#state.hand_state, Conn) of
-		{reply, Reply, NewState} ->
-			ok = iris:reply(From, Reply),
-			{noreply, State#state{hand_state = NewState}};
-		{noreply, NewState} ->
-			{noreply, State#state{hand_state = NewState}};
-		{stop, Reason, Reply, NewState} ->
-			ok = iris:reply(From, Reply),
-			{stop, Reason, State#state{hand_state = NewState}};
-		{stop, Reason, NewState} ->
-			{stop, Reason, State#state{hand_state = NewState}}
+handle_info({handle_request, Id, Request, Expiry}, State = #state{conn = Conn, hand_mod = Mod}) ->
+  case Expiry < timestamp() of
+    true  -> {noreply, State};
+    false ->
+      From = {Conn, Id},
+    	case Mod:handle_request(Request, From, State#state.hand_state) of
+    		{reply, Response, NewState} ->
+    			ok = iris_conn:reply(From, Response),
+    			{noreply, State#state{hand_state = NewState}};
+    		{noreply, NewState} ->
+    			{noreply, State#state{hand_state = NewState}};
+    		{stop, Reason, Reply, NewState} ->
+    			ok = iris_conn:reply(From, Reply),
+    			{stop, Reason, State#state{hand_state = NewState}};
+    		{stop, Reason, NewState} ->
+    			{stop, Reason, State#state{hand_state = NewState}}
+      end
 	end;
 
 %% Delivers a publish event to the callback and processes the result.

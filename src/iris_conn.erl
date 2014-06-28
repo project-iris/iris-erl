@@ -12,7 +12,7 @@
 	broadcast/3, request/4, reply/2, subscribe/2, publish/3, unsubscribe/2,
 	tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2]).
 
--export([handle_broadcast/2, handle_request/5]).
+-export([handle_reply/3]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
@@ -79,11 +79,11 @@ request(Connection, Cluster, Request, Timeout) ->
 
 
 %% Forwards an async reply to the relay to be sent back to the caller.
--spec reply(Sender :: iris:sender(), Reply :: binary()) ->
+-spec reply(Sender :: iris:sender(), {ok, Reply :: binary()} | {error, Reason :: term()}) ->
 	ok | {error, Reason :: atom()}.
 
-reply({Connection, RequestId}, Reply) ->
-	gen_server:call(Connection, {reply, RequestId, Reply}, infinity).
+reply({Connection, RequestId}, Response) ->
+	gen_server:call(Connection, {reply, RequestId, Response}, infinity).
 
 
 %% Forwards the subscription request to the relay.
@@ -146,19 +146,13 @@ tunnel_close(Connection, TunId) ->
 %% Internal API callback functions
 %% =============================================================================
 
+%% @private
 %% Schedules an application broadcast for the service handler to process.
--spec handle_broadcast(Limiter :: pid(), Message :: binary()) -> ok.
+-spec handle_reply(Connection :: pid(), Id :: pos_integer(),
+  {ok, Reply :: binary()} | {error, Reason :: term()}) -> ok.
 
-handle_broadcast(Limiter, Message) ->
-  ok = iris_mailbox:schedule(Limiter, byte_size(Message), {handle_broadcast, Message}).
-
-
-%% Schedules an application request for the service handler to process.
--spec handle_request(Limiter :: pid(), Owner :: pid(), Id :: non_neg_integer(),
-  Request :: binary(), Timeout :: pos_integer()) -> ok.
-
-handle_request(Limiter, Owner, Id, Request, Timeout) ->
-  ok = iris_mailbox:schedule(Limiter, byte_size(Request), {handle_request, {Owner, Id}, Request, Timeout}).
+handle_reply(Connection, Id, Response) ->
+  gen_server:cast(Connection, {reply, Id, Response}).
 
 
 %% =============================================================================
@@ -247,8 +241,8 @@ handle_call({request, Cluster, Request, Timeout}, From, State = #state{sock = So
 	end;
 
 %% Relays a request reply to the Iris node.
-handle_call({reply, ReqId, Reply}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:send_reply(Sock, ReqId, Reply), State};
+handle_call({reply, ReqId, Response}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:send_reply(Sock, ReqId, Response), State};
 
 %% Relays a subscription request to the Iris node (taking care of dupliactes).
 handle_call({subscribe, Topic}, _From, State = #state{sock = Sock}) ->
@@ -300,13 +294,13 @@ handle_call({tunnel_close, TunId}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:send_tunnel_close(Sock, TunId), State}.
 
 %% Delivers a reply to a pending request.
-handle_cast({reply, ReqId, Reply}, State) ->
+handle_cast({reply, Id, Response}, State) ->
 	% Fetch the result channel and remove from state
-	{ReqId, Pending} = hd(ets:lookup(State#state.reqPend, ReqId)),
-	ets:delete(State#state.reqPend, ReqId),
+	{Id, Pending} = hd(ets:lookup(State#state.reqPend, Id)),
+	ets:delete(State#state.reqPend, Id),
 
 	% Reply to the pending process and return
-	gen_server:reply(Pending, Reply),
+	gen_server:reply(Pending, Response),
 	{noreply, State};
 
 %% Delivers a published event if the subscription is still alive.

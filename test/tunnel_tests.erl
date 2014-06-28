@@ -9,7 +9,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -behaviour(iris_server).
--export([init/2, handle_broadcast/2, handle_request/4, handle_publish/4,
+-export([init/2, handle_broadcast/2, handle_request/3, handle_publish/4,
 	handle_tunnel/3, handle_drop/2, terminate/2]).
 
 %% Local Iris node's listener port
@@ -146,7 +146,7 @@ terminate(_Reason, _State) -> ok.
 handle_broadcast(_Message, State) ->
 	{stop, unimplemented, State}.
 
-handle_request(_Request, _From, State, _Link) ->
+handle_request(_Request, _From, State) ->
 	{stop, unimplemented, State}.
 
 handle_publish(_Topic, _Event, State, _Link) ->

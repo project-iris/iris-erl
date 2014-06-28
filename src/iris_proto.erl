@@ -14,7 +14,7 @@
 
 -module(iris_proto).
 
--export([send_init/2, send_broadcast/3, send_request/5, send_reply/4,
+-export([send_init/2, send_broadcast/3, send_request/5, send_reply/3,
 	send_subscribe/2, send_publish/3, send_unsubscribe/2, send_close/1,
 	send_tunnel_init/4, send_tunnel_confirm/3, send_tunnel_allowance/3,
 	send_tunnel_transfer/4, send_tunnel_close/2, proc_init/1]).
@@ -96,12 +96,13 @@ send_request(Socket, Id, Cluster, Request, Timeout) ->
 
 %% Sends an application reply initiation.
 -spec send_reply(Socket :: port(), Id :: non_neg_integer(),
-	Reply :: binary(), Fault :: [byte()]) -> ok.
+	{ok, Reply :: binary()} | {error, Reason :: term()}) -> ok.
 
-send_reply(Socket, Id, Reply, []) ->
+send_reply(Socket, Id, {ok, Reply}) ->
 	ok = gen_tcp:send(Socket, [?OP_REPLY, pack_varint(Id), pack_boolean(true), pack_binary(Reply)]);
 
-send_reply(Socket, Id, _Reply, Fault) ->
+send_reply(Socket, Id, {error, Reason}) ->
+  Fault = io_lib:format("~p", [Reason]),
 	ok = gen_tcp:send(Socket, [?OP_REPLY, pack_varint(Id),	pack_boolean(false), pack_string(Fault)]).
 
 %% Sends a topic subscription.
@@ -253,16 +254,16 @@ proc_close(Socket) ->
 
 proc_broadcast(Socket, Handler) ->
 	{ok, Message} = recv_binary(Socket),
-  ok = iris_conn:handle_broadcast(Handler, Message).
+  ok = iris_server:handle_broadcast(Handler, Message).
 
 %% Retrieves an application request delivery.
--spec proc_request(Socket :: port(), Owner :: pid(), Handler :: pid()) -> ok.
+-spec proc_request(Socket :: port(), Handler :: pid()) -> ok.
 
-proc_request(Socket, Owner, Handler) ->
+proc_request(Socket, Handler) ->
 	{ok, Id}      = recv_varint(Socket),
 	{ok, Request} = recv_binary(Socket),
 	{ok, Timeout} = recv_varint(Socket),
-  ok = iris_conn:handle_request(Handler, Owner, Id, Request, Timeout).
+  ok = iris_server:handle_request(Handler, Id, Request, Timeout).
 
 %% Retrieves an application reply delivery.
 -spec proc_reply(Socket :: port(), Owner :: pid()) -> ok.
@@ -271,16 +272,16 @@ proc_reply(Socket, Owner) ->
 	{ok, Id}      = recv_varint(Socket),
 	{ok, Timeout} = recv_bool(Socket),
 	case Timeout of
-		true  -> Owner ! {reply, Id, {error, timeout}};
+		true  -> ok = iris_conn:handle_reply(Owner, Id, {error, timeout});
 		false ->
 			{ok, Success} = recv_bool(Socket),
 			case Success of
 				true ->
 					{ok, Reply} = recv_binary(Socket),
-					Owner ! {reply, Id, {ok, Reply}};
+					ok = iris_conn:handle_reply(Owner, Id, {ok, Reply});
 				false ->
 					{ok, Fault} = recv_string(Socket),
-					Owner ! {reply, Id, {error, Fault}}
+					ok = iris_conn:handle_reply(Owner, Id, {error, Fault})
 			end
 	end,
 	ok.
@@ -361,7 +362,7 @@ start_link(Socket, Broadcaster, Requester) ->
 process(Socket, Owner, Broadcaster, Requester) ->
 	ok = case recv_byte(Socket) of
 		{ok, ?OP_BROADCAST}    -> proc_broadcast(Socket, Broadcaster);
-		{ok, ?OP_REQUEST}      -> proc_request(Socket, Owner, Requester);
+		{ok, ?OP_REQUEST}      -> proc_request(Socket, Requester);
 		{ok, ?OP_REPLY}        -> proc_reply(Socket, Owner);
 		{ok, ?OP_PUBLISH}      -> proc_publish(Socket, Owner);
 		{ok, ?OP_TUN_INIT}     -> proc_tunnel_init(Socket, Owner);

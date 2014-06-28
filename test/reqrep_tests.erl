@@ -7,112 +7,115 @@
 
 -module(reqrep_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("configs.hrl").
 
 -behaviour(iris_server).
--export([init/2, handle_broadcast/2, handle_request/4, handle_publish/4,
+-export([init/2, handle_broadcast/2, handle_request/3, handle_publish/4,
 	handle_tunnel/3, handle_drop/2, terminate/2]).
 
-%% Local Iris node's listener port
--define(RELAY_PORT, 55555).
+%% Tests multiple concurrent client and service requests.
+request_test() ->
+  % Test specific configurations
+  ConfClients  = 25,
+  ConfServers  = 25,
+  ConfRequests = 25,
+
+  Barrier = iris_barrier:new(ConfClients + ConfServers),
+
+  % Start up the concurrent requesting clients
+  lists:foreach(fun(Client) ->
+    spawn(fun() ->
+      try
+        % Connect to the local relay
+        {ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+        iris_barrier:sync(Barrier),
+
+        % Request from the service cluster
+        lists:foreach(fun(Index) ->
+          Request = io_lib:format("client #~p, request ~p", [Client, Index]),
+          Binary  = list_to_binary(Request),
+          {ok, Binary} = iris_client:request(Conn, ?CONFIG_CLUSTER, Binary, 1000)
+        end, lists:seq(1, ConfRequests)),
+        iris_barrier:sync(Barrier),
+
+        % Disconnect from the local relay
+        ok = iris_client:stop(Conn),
+        iris_barrier:exit(Barrier)
+      catch
+        Exception -> iris_barrier:exit(Exception), ok
+      end
+    end)
+  end, lists:seq(1, ConfClients)),
+
+  % Start up the concurrent request services
+  lists:foreach(fun(Service) ->
+    spawn(fun() ->
+      try
+        % Register a new service to the relay
+        {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+        Conn = receive
+          {ok, Client} -> Client
+        end,
+        iris_barrier:sync(Barrier),
+
+        % Request from the service cluster
+        lists:foreach(fun(Index) ->
+          Request = io_lib:format("server #~p, request ~p", [Service, Index]),
+          Binary  = list_to_binary(Request),
+          {ok, Binary} = iris_client:request(Conn, ?CONFIG_CLUSTER, Binary, 1000)
+        end, lists:seq(1, ConfRequests)),
+        iris_barrier:sync(Barrier),
+
+        % Unregister the service
+        ok = iris_server:stop(Server),
+        iris_barrier:exit(Barrier)
+      catch
+        Exception -> iris_barrier:exit(Exception), ok
+      end
+    end)
+  end, lists:seq(1, ConfServers)),
+
+  % Schedule the parallel operations
+  ok = iris_barrier:wait(Barrier),
+  ok = iris_barrier:wait(Barrier),
+  ok = iris_barrier:wait(Barrier).
 
 
-%% =============================================================================
-%% Tests
-%% =============================================================================
+%% Tests the request memory limitation.
+request_memory_limit_test() ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self(), [{request_memory, 1}]),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
 
-%% Sends a few requests to itself, waiting for the echo.
-single_test() ->
-	% Connect to the Iris network
-	{ok, Server, Link} = iris_server:start(?RELAY_PORT, "single", ?MODULE, nil),
+  % Check that a 1 byte request passes
+  {ok, _Reply} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, 1),
 
-	% Send a handful of requests, verifying the replies
-	Count = 1000,
-	lists:foreach(fun(_) ->
-		Req = crypto:strong_rand_bytes(128),
-		{ok, Req} = iris:request(Link, "single", Req, 250)
-	end, lists:seq(1, Count)),
+  % Check that a 2 byte request is dropped
+  {error, timeout} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, 1),
 
-	% Close the Iris connection
-	ok = iris_server:stop(Server).
+  % Unregister the service
+  ok = iris_server:stop(Server).
 
-% Starts a handful of concurrent servers which send requests to each other.
-multi_test() ->
-	Servers = 75,
-	Requests = 75,
-
-	% Start up the concurrent requesters (and repliers)
-	lists:foreach(fun(_) ->
-		Parent = self(),
-		spawn(fun() ->
-			% Start a single server and signal parent
-			{ok, Server, Link} = iris_server:start(?RELAY_PORT, "multi", ?MODULE, nil),
-			Parent ! {ok, self()},
-
-			% Wait for permission to continue
-			receive
-				cont -> ok
-			end,
-
-			% Send the requests to the group and wait for the replies
-			lists:foreach(fun(_) ->
-				Req = crypto:strong_rand_bytes(128),
-				{ok, Req} = iris:request(Link, "multi", Req, 250)
-			end, lists:seq(1, Requests)),
-			Parent ! done,
-
-			% Wait for permission to terminate
-			receive
-				term -> ok
-			end,
-
-			% Terminate the server and signal parent
-			ok = iris_server:stop(Server),
-			Parent ! stop
-		end)
-	end, lists:seq(1, Servers)),
-
-	% Wait for all the inits
-	Pids = lists:map(fun(_) ->
-		receive
-			{ok, Pid} -> Pid
-		end
-	end, lists:seq(1, Servers)),
-
-	% Permit all servers to begin the requests
-	lists:foreach(fun(Pid) -> Pid ! cont end, Pids),
-
-	% Wait for all the servers to finish the request tests
-	lists:foreach(fun(_) ->
-		receive
-			done -> ok
-		end
-	end, lists:seq(1, Servers)),
-
-	% Permit all servers to terminate
-	lists:foreach(fun(Pid) -> Pid ! term end, Pids),
-
-	% Wait for all the terminations
-	lists:foreach(fun(_) ->
-		receive
-			stop -> ok
-		end
-	end, lists:seq(1, Servers)).
 
 %% =============================================================================
 %% Iris server callback methods
 %% =============================================================================
 
 %% Simply saves the parent tester for reporting events.
-init(_Conn, nil) -> {ok, sync}.
+init(Conn, Parent) ->
+  Parent ! {ok, Conn},
+  {ok, sync}.
 
 %% Echoes a request back to the sender, notifying the parent of the event.
 %% Depending on the parity of the request, the reply is sent back sync or async.
-handle_request(Request, _From, sync, _Link) ->
-	{reply, Request, async};
+handle_request(Request, _From, sync) ->
+	{reply, {ok, Request}, async};
 
-handle_request(Request, From, async, _Link) ->
+handle_request(Request, From, async) ->
 	spawn(fun() ->
-		ok = iris:reply(From, Request)
+		ok = iris_server:reply(From, {ok, Request})
 	end),
 	{noreply, sync}.
 

@@ -7,7 +7,7 @@
 
 -module(iris_client).
 -export([start/1, start_link/1, stop/1]).
--export([broadcast/3]).
+-export([broadcast/3, request/4]).
 
 
 -spec start(Port :: pos_integer()) ->
@@ -42,3 +42,24 @@ stop(Client) ->	iris_conn:close(Client).
 
 broadcast(Client, Cluster, Message) ->
 	ok = iris_conn:broadcast(Client, Cluster, Message).
+
+
+%% @doc Executes a synchronous request to be serviced by a member of the
+%%      specified cluster, load-balanced between all participant, returning
+%%      the received reply.
+%%
+%%      The timeout unit is in milliseconds. Infinity is not supported!
+%%
+%% @spec (Client, Cluster, Request, Timeout) -> {ok, Reply} | {error, Reason}
+%%      Client  = pid()
+%%      Cluster = string()
+%%      Request = binary()
+%%      Timeout = pos_integer()
+%%      Reply   = binary()
+%%      Reason  = timeout | string()
+%% @end
+-spec request(Client :: pid(), Cluster :: string(), Request :: binary(), Timeout :: pos_integer()) ->
+  {ok, Reply :: binary()} | {error, Reason :: (timeout | string())}.
+
+request(Client, Cluster, Request, Timeout) ->
+  iris_relay:request(Client, Cluster, Request, Timeout).

@@ -35,7 +35,7 @@
 %% @end
 
 -module(iris).
--export([connect/3, broadcast/3, request/4, reply/2, subscribe/2, publish/3,
+-export([connect/3, subscribe/2, publish/3,
 	unsubscribe/2, tunnel/3, send/3, recv/2, close/1]).
 
 %% =============================================================================
@@ -80,60 +80,6 @@ connect(Port, App, Handler) ->
 		{ok, Connection} -> {ok, {connection, Connection}};
 		Error            -> Error
 	end.
-
-%% @doc Broadcasts a message to all applications of type app. No guarantees are
-%%      made that all recipients receive the message (best effort).
-%%
-%%      The call blocks until the message is sent to the relay node.
-%%
-%% @spec (Connection, App, Message) -> ok | {error, Reason}
-%%      Connection = connection()
-%%      App        = string()
-%%      Message    = binary()
-%%      Reason     = atom()
-%% @end
--spec broadcast(Connection :: connection(), App :: string(), Message :: binary()) ->
-	ok | {error, Reason :: atom()}.
-
-broadcast({connection, Connection}, App, Message) ->
-	iris_relay:broadcast(Connection, App, Message).
-
-%% @doc Executes a synchronous request to app, load balanced between all the
-%%      active ones, returning the received reply.
-%%
-%%      The call blocks until either a reply arrives or the request times out.
-%%
-%% @spec (Connection, App, Request, Timeout) -> {ok, Reply} | {error, Reason}
-%%      Connection = connection()
-%%      App        = string()
-%%      Request    = binary()
-%%      Timeout    = pos_integer()
-%%      Reply      = binary()
-%%      Reason     = timeout | atom()
-%% @end
--spec request(Connection :: connection(), App :: string(), Request :: binary(), Timeout :: pos_integer()) ->
-	{ok, Reply :: binary()} | {error, Reason :: atom()}.
-
-request({connection, Connection}, App, Request, Timeout) ->
-	iris_relay:request(Connection, App, Request, Timeout).
-
-%% @doc Remote pair of the request function. Should be used to send back a reply
-%%      to the request origin.
-%%
-%%      The call blocks until the message is sent to the relay node.
-%%
-%%      Sender must be the Sender argument from the request message.
-%%
-%% @spec (Sender, Reply) -> ok | {error, Reason}
-%%      Sender = sender()
-%%      Reply  = binary()
-%%      Reason = atom()
-%% @end
--spec reply(Sender :: sender(), Reply :: binary()) ->
-	ok | {error, Reason :: atom()}.
-
-reply(Sender, Reply) ->
-	iris_relay:reply(Sender, Reply).
 
 %% @doc Subscribes to a topic, receiving events as process messages.
 %%
