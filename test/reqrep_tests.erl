@@ -111,8 +111,8 @@ init(Conn, Parent) ->
   Parent ! {ok, Conn},
   {ok, sync}.
 
-%% Echoes a request back to the sender, notifying the parent of the event.
-%% Depending on the parity of the request, the reply is sent back sync or async.
+%% Echoes a request back to the sender. Depending on the parity of the request,
+%% the reply is sent back sync or async.
 handle_request(Request, _From, sync) ->
 	{reply, {ok, Request}, async};
 

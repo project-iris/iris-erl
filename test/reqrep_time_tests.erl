@@ -5,7 +5,7 @@
 %% cloud messaging framework, and as such, the same licensing terms apply.
 %% For details please see http://iris.karalabe.com/downloads#License
 
--module(reqrep_fail_tests).
+-module(reqrep_time_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("configs.hrl").
 
@@ -14,23 +14,20 @@
   handle_tunnel/3, handle_drop/2, terminate/2]).
 
 
-%% Tests request failure forwarding.
-request_fail_test() ->
+%% Tests the request timeouts.
+request_timeout_test() ->
   % Test specific configurations
-  ConfRequests = 125,
+  ConfSleep = 25,
 
   % Register a new service to the relay
-  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, {self(), ConfSleep}),
   Conn = receive
     {ok, Client} -> Client
   end,
 
-  % Request from the failing service cluster
-  lists:foreach(fun(Index) ->
-    Request = lists:flatten(io_lib:format("failure ~p", [Index])),
-    Binary  = list_to_binary(Request),
-    {error, Request} = iris_client:request(Conn, ?CONFIG_CLUSTER, Binary, 1000)
-  end, lists:seq(1, ConfRequests)),
+  % Check that the timeouts are complied with
+  {ok, _Reply}     = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, ConfSleep * 2),
+  {error, timeout} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, ConfSleep div 2),
 
   % Unregister the service
   ok = iris_server:stop(Server).
@@ -41,20 +38,14 @@ request_fail_test() ->
 %% =============================================================================
 
 %% Simply saves the parent tester for reporting events.
-init(Conn, Parent) ->
+init(Conn, {Parent, Sleep}) ->
   Parent ! {ok, Conn},
-  {ok, sync}.
+  {ok, Sleep}.
 
-%% Echoes a request back to the sender, but on the error channel. Depending on
-%% the parity of the request, the reply is sent back sync or async.
-handle_request(Request, _From, sync) ->
-  {reply, {error, Request}, async};
-
-handle_request(Request, From, async) ->
-  spawn(fun() ->
-    ok = iris_server:reply(From, {error, Request})
-  end),
-  {noreply, sync}.
+%% Sleeps a while and echoes the request back to the sender.
+handle_request(Request, _From, Sleep) ->
+  timer:sleep(Sleep),
+  {reply, {ok, Request}, Sleep}.
 
 %% No state to clean up.
 terminate(_Reason, _State) -> ok.
