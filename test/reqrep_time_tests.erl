@@ -33,6 +33,41 @@ request_timeout_test() ->
   ok = iris_server:stop(Server).
 
 
+%% Tests that enqueued but expired requests don't get executed
+request_expiration_test() ->
+  % Test specific configurations
+  ConfRequests = 4,
+  ConfSleep    = 25,
+
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, {self(), ConfSleep}),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Start a batch of concurrent requesters (all but one should be scheduled remotely)
+  lists:foreach(fun(_) ->
+    spawn(iris_client, request, [Conn, ?CONFIG_CLUSTER, <<0:8>>, 1])
+  end, lists:seq(1, ConfRequests)),
+
+  % Wait for all of them to complete and verify that all but 1 expired
+  timer:sleep((ConfRequests + 1) * ConfSleep),
+
+  ok = receive
+    _ -> ok
+  after
+    1 -> timeout
+  end,
+
+  ok = receive
+    _ -> not_expired
+  after
+    1 -> ok
+  end,
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
 %% =============================================================================
 %% Iris server callback methods
 %% =============================================================================
@@ -40,12 +75,13 @@ request_timeout_test() ->
 %% Simply saves the parent tester for reporting events.
 init(Conn, {Parent, Sleep}) ->
   Parent ! {ok, Conn},
-  {ok, Sleep}.
+  {ok, {Parent, Sleep}}.
 
 %% Sleeps a while and echoes the request back to the sender.
-handle_request(Request, _From, Sleep) ->
+handle_request(Request, _From, {Parent, Sleep}) ->
+  Parent ! Request,
   timer:sleep(Sleep),
-  {reply, {ok, Request}, Sleep}.
+  {reply, {ok, Request}, {Parent, Sleep}}.
 
 %% No state to clean up.
 terminate(_Reason, _State) -> ok.
