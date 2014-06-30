@@ -102,7 +102,7 @@ send_reply(Socket, Id, {ok, Reply}) ->
 	ok = gen_tcp:send(Socket, [?OP_REPLY, pack_varint(Id), pack_boolean(true), pack_binary(Reply)]);
 
 send_reply(Socket, Id, {error, Reason}) ->
-  Fault = io_lib:format("~p", [Reason]),
+  Fault = io_lib:format("~s", [Reason]),
 	ok = gen_tcp:send(Socket, [?OP_REPLY, pack_varint(Id),	pack_boolean(false), pack_string(Fault)]).
 
 %% Sends a topic subscription.
