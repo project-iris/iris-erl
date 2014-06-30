@@ -12,7 +12,7 @@
 %% @private
 
 -module(iris_mailbox).
--export([start_link/3, schedule/3, grant/2, limit/4]).
+-export([start_link/3, schedule/3, replenish/2, limit/4]).
 
 
 %% =============================================================================
@@ -36,10 +36,10 @@ schedule(Limiter, Size, Message) ->
 
 
 %% Grants additional space allowance to a bounded mailbox.
--spec grant(Limiter :: pid(), Space :: non_neg_integer()) -> ok.
+-spec replenish(Limiter :: pid(), Space :: non_neg_integer()) -> ok.
 
-grant(Limiter, Space) ->
-  Limiter ! {grant, Space},
+replenish(Limiter, Space) ->
+  Limiter ! {replenish, Space},
   ok.
 
 
@@ -60,6 +60,6 @@ limit(Owner, Type, Limit, Used) ->
     {schedule, Size, _Message} ->
       io:format("~p exceeded memory allowance: limit=~p used=~p size=~p~n", [Type, Limit, Used, Size]),
       limit(Owner, Type, Limit, Used);
-    {grant, Space} ->
+    {replenish, Space} ->
       limit(Owner, Type, Limit, Used - Space)
   end.

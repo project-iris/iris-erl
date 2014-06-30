@@ -127,11 +127,19 @@ broadcast_memory_limit_test() ->
   end,
 
   % Check that a 2 byte broadcast is dropped
-  ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, <<0:8>>),
+  ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, <<0:8, 1:8>>),
   ok = receive
     _ -> not_dropped
   after
     1 -> ok
+  end,
+
+  % Check that space freed gets replenished
+  ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, <<0:8>>),
+  ok = receive
+    _ -> ok
+  after
+    1 -> timeout
   end,
 
   % Unregister the service

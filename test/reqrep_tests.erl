@@ -93,7 +93,10 @@ request_memory_limit_test() ->
   {ok, _Reply} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, 1),
 
   % Check that a 2 byte request is dropped
-  {error, timeout} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, 1),
+  {error, timeout} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8, 1:8>>, 1),
+
+  % Check that space freed gets replenished
+  {ok, _Reply} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, 1),
 
   % Unregister the service
   ok = iris_server:stop(Server).

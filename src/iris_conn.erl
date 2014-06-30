@@ -284,7 +284,7 @@ handle_call({tunnel, Cluster, Timeout}, From, State = #state{sock = Sock}) ->
 handle_call({tunnel_send, TunId, Message}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:send_tunnel_data(Sock, TunId, Message), State};
 
-%% Relays a tunnel acknowledgement to the Iris node.
+%% Relays a tunnel acknowledgment to the Iris node.
 handle_call({tunnel_ack, TunId}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:send_tunnel_ack(Sock, TunId), State};
 
