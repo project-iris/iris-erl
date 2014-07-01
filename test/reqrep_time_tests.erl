@@ -10,8 +10,8 @@
 -include("configs.hrl").
 
 -behaviour(iris_server).
--export([init/2, handle_broadcast/2, handle_request/3, handle_publish/4,
-  handle_tunnel/3, handle_drop/2, terminate/2]).
+-export([init/2, handle_broadcast/2, handle_request/3, handle_tunnel/3,
+  handle_drop/2, terminate/2]).
 
 
 %% Tests the request timeouts.
@@ -28,6 +28,9 @@ request_timeout_test() ->
   % Check that the timeouts are complied with
   {ok, _Reply}     = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, ConfSleep * 2),
   {error, timeout} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, ConfSleep div 2),
+
+  % Flush all received messages (eunit reuses tester processes)
+  flush(),
 
   % Unregister the service
   ok = iris_server:stop(Server).
@@ -46,8 +49,8 @@ request_expiration_test() ->
   end,
 
   % Start a batch of concurrent requesters (all but one should be scheduled remotely)
-  lists:foreach(fun(_) ->
-    spawn(iris_client, request, [Conn, ?CONFIG_CLUSTER, <<0:8>>, 1])
+  lists:foreach(fun(Index) ->
+    spawn(iris_client, request, [Conn, ?CONFIG_CLUSTER, <<Index:8>>, 1])
   end, lists:seq(1, ConfRequests)),
 
   % Wait for all of them to complete and verify that all but 1 expired
@@ -67,6 +70,16 @@ request_expiration_test() ->
 
   % Unregister the service
   ok = iris_server:stop(Server).
+
+
+% Flushes all messages from the process mailbox.
+flush() ->
+  receive
+    _ -> flush()
+  after
+    1 -> ok
+  end.
+
 
 %% =============================================================================
 %% Iris server callback methods
@@ -92,9 +105,6 @@ terminate(_Reason, _State) -> ok.
 %% =============================================================================
 
 handle_broadcast(_Message, State) ->
-  {stop, unimplemented, State}.
-
-handle_publish(_Topic, _Event, State, _Link) ->
   {stop, unimplemented, State}.
 
 handle_tunnel(_Tunnel, State, _Link) ->

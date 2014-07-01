@@ -10,8 +10,8 @@
 -include("configs.hrl").
 
 -behaviour(iris_server).
--export([init/2, handle_broadcast/2, handle_request/3, handle_publish/4,
-	handle_tunnel/3, handle_drop/2, terminate/2]).
+-export([init/2, handle_broadcast/2, handle_request/3,	handle_tunnel/3,
+	handle_drop/2, terminate/2]).
 
 
 %% Tests multiple concurrent client and service broadcasts.
@@ -169,9 +169,6 @@ terminate(_Reason, _State) -> ok.
 %% =============================================================================
 
 handle_request(_Request, _From, State) ->
-	{stop, unimplemented, State}.
-
-handle_publish(_Topic, _Event, State, _Link) ->
 	{stop, unimplemented, State}.
 
 handle_tunnel(_Tunnel, State, _Link) ->
