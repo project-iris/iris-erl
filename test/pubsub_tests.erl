@@ -146,6 +146,42 @@ verify_events(Clients, Servers, Topics, Events) ->
 	end, lists:seq(1, Servers)).
 
 
+%% Tests the subscription memory limitation.
+publish_memory_limit_test() ->
+  % Connect to the relay
+	{ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+
+	% Subscribe to a topic and wait for state propagation
+  ok = iris_client:subscribe(Conn, ?CONFIG_TOPIC, pubsub_handler, {self(), ?CONFIG_TOPIC}, [{event_memory, 1}]),
+
+  % Check that a 1 byte publish passes
+  ok = iris_client:publish(Conn, ?CONFIG_TOPIC, <<0:8>>),
+  ok = receive
+    _ -> ok
+  after
+    1 -> timeout
+  end,
+
+  % Check that a 2 byte publish is dropped
+  ok = iris_client:publish(Conn, ?CONFIG_TOPIC, <<0:8, 1:8>>),
+  ok = receive
+    _ -> not_dropped
+  after
+    1 -> ok
+  end,
+
+  % Check that space freed gets replenished
+  ok = iris_client:publish(Conn, ?CONFIG_TOPIC, <<0:8>>),
+  ok = receive
+    _ -> ok
+  after
+    1 -> timeout
+  end,
+
+	% Disconnect from the local relay
+	ok = iris_client:stop(Conn).
+
+
 %% =============================================================================
 %% Iris server callback methods
 %% =============================================================================
