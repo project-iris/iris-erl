@@ -35,8 +35,7 @@
 %% @end
 
 -module(iris).
--export([connect/3, subscribe/2, publish/3,
-	unsubscribe/2, tunnel/3, send/3, recv/2, close/1]).
+-export([connect/3, tunnel/3, send/3, recv/2, close/1]).
 
 %% =============================================================================
 %% Iris type definitions
@@ -80,54 +79,6 @@ connect(Port, App, Handler) ->
 		{ok, Connection} -> {ok, {connection, Connection}};
 		Error            -> Error
 	end.
-
-%% @doc Subscribes to a topic, receiving events as process messages.
-%%
-%%      The call blocks until the message is sent to the relay node.
-%%
-%% @spec (Connection, Topic) -> ok | {error, Reason}
-%%      Connection = connection()
-%%      Topic      = string()
-%%      Reason     = atom()
-%% @end
--spec subscribe(Connection :: connection(), Topic :: string()) ->
-	ok | {error, Reason :: atom()}.
-
-subscribe({connection, Connection}, Topic) ->
-	iris_relay:subscribe(Connection, Topic).
-
-%% @doc Publishes an event to all applications subscribed to the topic. No
-%%      guarantees are made that all subscribers receive the message (best
-%%      effort).
-%%
-%%      The call blocks until the message is sent to the relay node.
-%%
-%% @spec (Connection, Topic, Event) -> ok | {error, Reason}
-%%      Connection = connection()
-%%      Topic      = string()
-%%      Event      = binary()
-%%      Reason     = atom()
-%% @end
--spec publish(Connection :: connection(), Topic :: string(), Event :: binary()) ->
-	ok | {error, Reason :: atom()}.
-
-publish({connection, Connection}, Topic, Event) ->
-	iris_relay:publish(Connection, Topic, Event).
-
-%% @doc Unsubscribes from a previously subscribed topic.
-%%
-%%      The call blocks until the message is sent to the relay node.
-%%
-%% @spec (Connection, Topic) -> ok | {error, Reason}
-%%      Connection = connection()
-%%      Topic      = string()
-%%      Reason     = atom()
-%% @end
--spec unsubscribe(Connection :: connection(), Topic :: string()) ->
-	ok | {error, Reason :: atom()}.
-
-unsubscribe({connection, Connection}, Topic) ->
-	iris_relay:unsubscribe(Connection, Topic).
 
 %% @doc Opens a direct tunnel to an instance of app, allowing pairwise-exclusive
 %%      and order-guaranteed message passing between them.

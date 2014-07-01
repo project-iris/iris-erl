@@ -18,7 +18,7 @@
 	send_subscribe/2, send_publish/3, send_unsubscribe/2, send_close/1,
 	send_tunnel_init/4, send_tunnel_confirm/3, send_tunnel_allowance/3,
 	send_tunnel_transfer/4, send_tunnel_close/2, proc_init/1]).
--export([start_link/3, process/4]).
+-export([start_link/4, process/5]).
 
 % Packet opcodes
 -define(OP_INIT,         16#00). % Out: connection initiation            | In: connection acceptance
@@ -247,7 +247,7 @@ proc_init(Socket) ->
 -spec proc_close(Socket :: port()) ->	{ok, Reason :: [byte()]}.
 
 proc_close(Socket) ->
-	{ok, Reason} = recv_string(Socket).
+	{ok, _Reason} = recv_string(Socket).
 
 %% Retrieves an application broadcast delivery.
 -spec proc_broadcast(Socket :: port(), Handler :: pid()) -> ok.
@@ -287,13 +287,17 @@ proc_reply(Socket, Owner) ->
 	ok.
 
 %% Retrieves a topic event delivery.
--spec proc_publish(Socket :: port(), Owner :: pid()) ->	ok.
+-spec proc_publish(Socket :: port(), Topics :: ets:tid()) ->	ok.
 
-proc_publish(Socket, Owner) ->
+proc_publish(Socket, Topics) ->
 	{ok, Topic} = recv_string(Socket),
 	{ok, Event} = recv_binary(Socket),
-	Owner ! {publish, Topic, Event},
-	ok.
+
+	ok = case ets:lookup(Topics, Topic) of
+		[{Topic, _Sub, Limiter}] ->
+			ok = iris_topic:handle_event(Limiter, Event);
+		[] -> ok
+	end.
 
 %% Retrieves a tunnel initiation message.
 -spec proc_tunnel_init(Socket :: port(), Owner :: pid()) -> ok.
@@ -349,22 +353,24 @@ proc_tunnel_close(Socket, Owner) ->
 %% Starts a new packet processor, reading from the given socket and dispatching
 %% mostly to self(), with the exception of broadcasts and requests which have
 %% bounded mailboxes in front of the handler.
--spec start_link(Socket :: port(), Broadcaster :: pid(), Requester :: pid()) -> pid().
+-spec start_link(Socket :: port(), Broadcaster :: pid(), Requester :: pid(),
+	Topics :: ets:tid()) -> pid().
 
-start_link(Socket, Broadcaster, Requester) ->
-  spawn_link(?MODULE, process, [Socket, self(), Broadcaster, Requester]).
+start_link(Socket, Broadcaster, Requester, Topics) ->
+  spawn_link(?MODULE, process, [Socket, self(), Broadcaster, Requester, Topics]).
+
 
 %% Retrieves messages from the client connection and keeps processing them until
 %% either the relay closes (graceful close) or the connection drops.
 -spec process(Socket :: port(), Owner :: pid(),
-  Broadcaster :: pid(), Requester :: pid()) -> no_return().
+  Broadcaster :: pid(), Requester :: pid(), Topics :: ets:tid()) -> no_return().
 
-process(Socket, Owner, Broadcaster, Requester) ->
+process(Socket, Owner, Broadcaster, Requester, Topics) ->
 	ok = case recv_byte(Socket) of
 		{ok, ?OP_BROADCAST}    -> proc_broadcast(Socket, Broadcaster);
 		{ok, ?OP_REQUEST}      -> proc_request(Socket, Requester);
 		{ok, ?OP_REPLY}        -> proc_reply(Socket, Owner);
-		{ok, ?OP_PUBLISH}      -> proc_publish(Socket, Owner);
+		{ok, ?OP_PUBLISH}      -> proc_publish(Socket, Topics);
 		{ok, ?OP_TUN_INIT}     -> proc_tunnel_init(Socket, Owner);
 		{ok, ?OP_TUN_CONFIRM}  -> proc_tunnel_result(Socket, Owner);
     {ok, ?OP_TUN_ALLOW}    -> proc_tunnel_allowance(Socket, Owner);
@@ -374,4 +380,4 @@ process(Socket, Owner, Broadcaster, Requester) ->
 			{ok, ""} = proc_close(Socket),
 			exit(ok)
 	end,
-	process(Socket, Owner, Broadcaster, Requester).
+	process(Socket, Owner, Broadcaster, Requester, Topics).

@@ -7,7 +7,7 @@
 
 -module(iris_client).
 -export([start/1, start_link/1, stop/1]).
--export([broadcast/3, request/4]).
+-export([broadcast/3, request/4, subscribe/5, publish/3, unsubscribe/2]).
 
 
 -spec start(Port :: pos_integer()) ->
@@ -62,4 +62,58 @@ broadcast(Client, Cluster, Message) ->
   {ok, Reply :: binary()} | {error, Reason :: (timeout | string())}.
 
 request(Client, Cluster, Request, Timeout) ->
-  iris_relay:request(Client, Cluster, Request, Timeout).
+  iris_conn:request(Client, Cluster, Request, Timeout).
+
+
+%% @doc Subscribes to a topic, using handler as the callback for arriving events.
+%%
+%%      The method blocks until the subscription is forwarded to the relay.
+%%      There might be a small delay between subscription completion and start of
+%%      event delivery. This is caused by subscription propagation through the
+%%      network.
+%%
+%% @spec (Connection, Topic) -> ok | {error, Reason}
+%%      Connection = connection()
+%%      Topic      = string()
+%%      Reason     = atom()
+%% @end
+-spec subscribe(Client :: pid(), Topic :: string(), Module :: atom(),	Args :: term(),
+	Options :: [{atom(), term()}]) ->	ok | {error, Reason :: atom()}.
+
+subscribe(Client, Topic, Module, Args, Options) ->
+	iris_conn:subscribe(Client, Topic, Module, Args, Options).
+
+
+%% @doc Publishes an event to all applications subscribed to the topic. No
+%%      guarantees are made that all subscribers receive the message (best
+%%      effort).
+%%
+%%      The call blocks until the message is sent to the relay node.
+%%
+%% @spec (Connection, Topic, Event) -> ok | {error, Reason}
+%%      Connection = connection()
+%%      Topic      = string()
+%%      Event      = binary()
+%%      Reason     = atom()
+%% @end
+-spec publish(Client :: pid(), Topic :: string(), Event :: binary()) ->
+	ok | {error, Reason :: atom()}.
+
+publish(Client, Topic, Event) ->
+	iris_conn:publish(Client, Topic, Event).
+
+
+%% @doc Unsubscribes from a previously subscribed topic.
+%%
+%%      The call blocks until the message is sent to the relay node.
+%%
+%% @spec (Connection, Topic) -> ok | {error, Reason}
+%%      Connection = connection()
+%%      Topic      = string()
+%%      Reason     = atom()
+%% @end
+-spec unsubscribe(Client :: pid(), Topic :: string()) ->
+	ok | {error, Reason :: atom()}.
+
+unsubscribe(Client, Topic) ->
+	iris_client:unsubscribe(Client, Topic).

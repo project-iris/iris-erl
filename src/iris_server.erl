@@ -219,7 +219,6 @@
 
 -module(iris_server).
 -export([start/4, start/5, start_link/4, start_link/5, stop/1, reply/2]).
-
 -export([handle_broadcast/2, handle_request/4]).
 
 -behaviour(gen_server).
@@ -243,9 +242,6 @@
 -callback handle_request(Request :: binary(), From :: iris:sender(), State :: term()) ->
 	{reply, {ok, Reply :: binary()} | {error, Reason :: term()}, NewState :: term()} | {noreply, NewState :: term()} |
 	{stop, Reply :: binary(), Reason :: term(), NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
-
--callback handle_publish(Topic :: string(), Event :: binary(), State :: term(), Conn :: iris:connection()) ->
-	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
 -callback handle_tunnel(Tunnel :: iris:tunnel(), State :: term(), Conn :: iris:connection()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
@@ -383,7 +379,7 @@ stop(Server) ->
   ok | {error, Reason :: atom()}.
 
 reply(Client, Reply) ->
-  iris_relay:reply(Client, Reply).
+  iris_conn:reply(Client, Reply).
 
 
 %% =============================================================================

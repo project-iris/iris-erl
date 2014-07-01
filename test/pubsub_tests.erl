@@ -7,128 +7,142 @@
 
 -module(pubsub_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("configs.hrl").
 
 -behaviour(iris_server).
--export([init/2, handle_broadcast/2, handle_request/3, handle_publish/4,
-	handle_tunnel/3, handle_drop/2, terminate/2]).
-
-%% Local Iris node's listener port
--define(RELAY_PORT, 55555).
+-export([init/2, handle_broadcast/2, handle_request/3, handle_tunnel/3,
+	handle_drop/2, terminate/2]).
 
 
-%% =============================================================================
-%% Tests
-%% =============================================================================
+%% Tests multiple concurrent client and service subscriptions and publishes.
+publish_test() ->
+  % Test specific configurations
+	ConfClients = 5,
+	ConfServers = 5,
+	ConfTopics  = 7,
+	ConfEvents  = 15,
 
-% Subscribes to a handfull of topics, and publishes to each a batch of messages.
-single_test() ->
-	Events = 75,
-	Topics = 75,
-	Names = lists:map(fun(_) ->
-		base64:encode_to_string(crypto:strong_rand_bytes(64))
-	end, lists:seq(1, Topics)),
+	% Pre-generate the topic names
+	Topics = [lists:flatten(io_lib:format("~s-~p", [?CONFIG_TOPIC, Index]))
+							|| Index <- lists:seq(1, ConfTopics)],
 
-	% Connect to the Iris network
-	{ok, Server, Link} = iris_server:start(?RELAY_PORT, "single", ?MODULE, self()),
+	Barrier = iris_barrier:new(ConfClients + ConfServers),
 
-	% Subscribe to a few topics
-	lists:foreach(fun(Topic) ->
-		ok = iris:subscribe(Link, Topic)
-	end, Names),
-
-  % Sleep a bit to ensure subscriptions succeeded
-  timer:sleep(10),
-
-	% Send some random events and check arrival
-	Messages = ets:new(events, [set, private]),
-	lists:foreach(fun(Topic) ->
-		lists:foreach(fun(_) ->
-			Event = crypto:strong_rand_bytes(128),
-			true = ets:insert_new(Messages, {Event, Topic}),
-			ok = iris:publish(Link, Topic, Event)
-		end, lists:seq(1, Events))
-	end, Names),
-
-	% Retrieve and verify all published events
-	lists:foreach(fun(_) ->
-		receive
-			{Topic, Event} ->
-				[{Event, Topic}] = ets:lookup(Messages, Event),
-				ets:delete(Messages, Event)
-		end
-	end, lists:seq(1, Topics * Events)),
-
-	% Close the Iris connection
-	ok = iris_server:stop(Server).
-
-% Multiple connections subscribe to the same batch of topics and publish to all.
-multi_test() ->
-	% Test parameters
-	Servers = 10,
-	Events = 10,
-	Topics = lists:map(fun(_) ->
-		base64:encode_to_string(crypto:strong_rand_bytes(64))
-	end, lists:seq(1, 10)),
-
-	% Start up the concurrent subscribers (and publishers)
-	lists:foreach(fun(_) ->
-		Parent = self(),
+	% Start up the concurrent publishing clients
+	lists:foreach(fun(Client) ->
 		spawn(fun() ->
-			% Start a single server, subscribe to all the topics and signal parent
-			{ok, Server, Link} = iris_server:start(?RELAY_PORT, "multi", ?MODULE, self()),
+			try
+				% Connect to the local relay
+				{ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+				iris_barrier:sync(Barrier),
 
-			lists:foreach(fun(Topic) ->
-				ok = iris:subscribe(Link, Topic)
-			end, Topics),
+				% Subscribe to the batch of topics
+				lists:foreach(fun(Topic) ->
+					ok = iris_client:subscribe(Conn, Topic, pubsub_handler, {self(), Topic}, [])
+				end, Topics),
+				timer:sleep(100),
+				iris_barrier:sync(Barrier),
 
-			Parent ! {ok, self()},
+				% Publish to all subscribers
+				lists:foreach(fun(Index) ->
+					lists:foreach(fun(Topic) ->
+						Event = io_lib:format("client #~p, event ~p", [Client, Index]),
+						ok = iris_client:publish(Conn, Topic, list_to_binary(Event))
+					end, Topics)
+				end, lists:seq(1, ConfEvents)),
+				iris_barrier:sync(Barrier),
 
-			% Wait for permission to continue
-			receive
-				cont -> ok
-			end,
+				% Verify all the topic deliveries
+				verify_events(ConfClients, ConfServers, Topics, ConfEvents),
+				iris_barrier:sync(Barrier),
 
-			% Publish to the whole group on every topic
-			lists:foreach(fun(Topic) ->
-				lists:foreach(fun(_) ->
-					ok = iris:publish(Link, Topic, list_to_binary(Topic))
-				end, lists:seq(1, Events))
-			end, Topics),
-
-			% Verify the inbound events
-			lists:foreach(fun(Topic) ->
-				Event = list_to_binary(Topic),
-				lists:foreach(fun(_) ->
-					receive
-						{Topic, Event} -> ok
-					end
-				end, lists:seq(1, Events * Servers))
-			end, Topics),
-
-			% Terminate the server and signal parent
-			ok = iris_server:stop(Server),
-			Parent ! done
+				% Disconnect from the local relay
+				ok = iris_client:stop(Conn),
+				iris_barrier:exit(Barrier)
+			catch
+				Exception -> iris_barrier:exit(Exception), ok
+			end
 		end)
-	end, lists:seq(1, Servers)),
+	end, lists:seq(1, ConfClients)),
 
-	% Wait for all the inits
-	Pids = lists:map(fun(_) ->
-		receive
-			{ok, Pid} -> Pid
-		end
-	end, lists:seq(1, Servers)),
+	% Start up the concurrent publishing services
+	lists:foreach(fun(Service) ->
+		spawn(fun() ->
+			try
+				% Register a new service to the relay
+				{ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+				Conn = receive
+					{ok, Client} -> Client
+				end,
+				iris_barrier:sync(Barrier),
 
-	% Sleep a bit to ensure subscriptions succeeded
-	timer:sleep(10),
+				% Subscribe to the batch of topics
+				lists:foreach(fun(Topic) ->
+					ok = iris_client:subscribe(Conn, Topic, pubsub_handler, {self(), Topic}, [])
+				end, Topics),
+				timer:sleep(100),
+				iris_barrier:sync(Barrier),
 
-	% Permit all servers to begin publishing
-	lists:foreach(fun(Pid) -> Pid ! cont end, Pids),
+				% Publish to all subscribers
+				lists:foreach(fun(Index) ->
+					lists:foreach(fun(Topic) ->
+						Event = io_lib:format("server #~p, event ~p", [Service, Index]),
+						ok = iris_client:publish(Conn, Topic, list_to_binary(Event))
+					end, Topics)
+				end, lists:seq(1, ConfEvents)),
+				iris_barrier:sync(Barrier),
 
-	% Wait for all the terminations (big timeout)
+				% Verify all the topic deliveries
+				verify_events(ConfClients, ConfServers, Topics, ConfEvents),
+				iris_barrier:sync(Barrier),
+
+				% Unregister the service
+				ok = iris_server:stop(Server),
+				iris_barrier:exit(Barrier)
+			catch
+				Exception -> iris_barrier:exit(Exception), ok
+			end
+		end)
+	end, lists:seq(1, ConfServers)),
+
+	% Schedule the parallel operations
+	ok = iris_barrier:wait(Barrier),
+	ok = iris_barrier:wait(Barrier),
+	ok = iris_barrier:wait(Barrier),
+	ok = iris_barrier:wait(Barrier),
+	ok = iris_barrier:wait(Barrier).
+
+%% Verifies the delivered topic events.
+verify_events(Clients, Servers, Topics, Events) ->
+	% Retrieve all the arrived publishes
+	Delivs = ets:new(events, [bag, private]),
 	lists:foreach(fun(_) ->
 		receive
-			done -> ok
+			{Topic, Binary} -> true = ets:insert(Delivs, {Topic, Binary})
 		end
+	end, lists:seq(1, (Clients + Servers) * length(Topics) * Events)),
+
+	% Verify all the individual events
+	lists:foreach(fun(Client) ->
+		lists:foreach(fun(Topic) ->
+			lists:foreach(fun(Index) ->
+				Event  = io_lib:format("client #~p, event ~p", [Client, Index]),
+				Binary = list_to_binary(Event),
+				[[]]  = ets:match(Delivs, {Topic, Binary}),
+				true   = ets:delete_object(Delivs, {Topic, Binary})
+			end, lists:seq(1, Events))
+		end, Topics)
+	end, lists:seq(1, Clients)),
+
+	lists:foreach(fun(Service) ->
+		lists:foreach(fun(Topic) ->
+			lists:foreach(fun(Index) ->
+				Event  = io_lib:format("server #~p, event ~p", [Service, Index]),
+				Binary = list_to_binary(Event),
+				[[]]  = ets:match(Delivs, {Topic, Binary}),
+				true   = ets:delete_object(Delivs, {Topic, Binary})
+			end, lists:seq(1, Events))
+		end, Topics)
 	end, lists:seq(1, Servers)).
 
 
@@ -137,12 +151,9 @@ multi_test() ->
 %% =============================================================================
 
 %% Simply saves the parent tester for reporting events.
-init(_Conn, Parent) -> {ok, Parent}.
-
-%% Handles a publish event by reporting it to the tester process.
-handle_publish(Topic, Event, Parent, _Link) ->
-	Parent ! {Topic, Event},
-	{noreply, Parent}.
+init(Conn, Parent) ->
+	Parent ! {ok, Conn},
+	{ok, Parent}.
 
 %% No state to clean up.
 terminate(_Reason, _State) -> ok.

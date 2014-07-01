@@ -9,7 +9,7 @@
 
 -module(iris_conn).
 -export([connect/1, connect_link/1, register/4, register_link/3, close/1,
-	broadcast/3, request/4, reply/2, subscribe/2, publish/3, unsubscribe/2,
+	broadcast/3, request/4, reply/2, subscribe/5, publish/3, unsubscribe/2,
 	tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2]).
 
 -export([handle_reply/3]).
@@ -87,11 +87,11 @@ reply({Connection, RequestId}, Response) ->
 
 
 %% Forwards the subscription request to the relay.
--spec subscribe(Connection :: pid(), Topic :: string()) ->
-	ok | {error, Reason :: atom()}.
+-spec subscribe(Conn :: pid(), Topic :: string(), Module :: atom(), Args :: term(),
+	Options :: [{atom(), term()}]) ->	ok | {error, Reason :: atom()}.
 
-subscribe(Connection, Topic) ->
-	gen_server:call(Connection, {subscribe, lists:flatten(Topic)}, infinity).
+subscribe(Connection, Topic, Module, Args, Options) ->
+	gen_server:call(Connection, {subscribe, lists:flatten(Topic), Module, Args, Options}, infinity).
 
 
 %% Publishes a message to the topic.
@@ -191,11 +191,13 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}}) ->
 					% Wait for init confirmation
 					case iris_proto:proc_init(Sock) of
 						{ok, _Version} ->
+							Topics = ets:new(subscriptions, [set, protected]),
+
 							% Spawn the mailbox limiter threads and message receiver
 							process_flag(trap_exit, true),
               Broadcaster = iris_mailbox:start_link(Handler, broadcast, BroadcastMemory),
               Requester   = iris_mailbox:start_link(Handler, request, RequestMemory),
-              _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester),
+              _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester, Topics),
 
               % Assemble the internal state and return
 							{ok, #state{
@@ -203,7 +205,7 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}}) ->
 								handler = Handler,
 								reqIdx  = 0,
 								reqPend = ets:new(requests, [set, private]),
-								subLive = ets:new(subscriptions, [set, private]),
+								subLive = Topics,
 								tunIdx  = 0,
 								tunPend = ets:new(tunnels_pending, [set, private]),
 								tunLive = ets:new(tunnels, [set, private]),
@@ -233,23 +235,20 @@ handle_call({request, Cluster, Request, Timeout}, From, State = #state{sock = So
 	NewState = State#state{reqIdx = ReqId+1},
 
 	% Send the request to the relay and finish with a pending reply
-	case iris_proto:send_request(Sock, ReqId, Cluster, Request, Timeout) of
-		ok    -> {noreply, NewState};
-		Error ->
-			ets:delete(State#state.reqPend, ReqId),
-			{reply, Error, NewState}
-	end;
+	ok = iris_proto:send_request(Sock, ReqId, Cluster, Request, Timeout),
+	{noreply, NewState};
 
 %% Relays a request reply to the Iris node.
 handle_call({reply, ReqId, Response}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:send_reply(Sock, ReqId, Response), State};
 
-%% Relays a subscription request to the Iris node (taking care of dupliactes).
-handle_call({subscribe, Topic}, _From, State = #state{sock = Sock}) ->
-	case ets:insert_new(State#state.subLive, {Topic}) of
-		true  -> {reply, iris_proto:send_subscribe(Sock, Topic), State};
-		false -> {reply, {error, duplicate}}
-	end;
+%% Relays a subscription request to the Iris node (taking care of duplicates).
+handle_call({subscribe, Topic, Module, Args, Options}, _From, State = #state{sock = Sock}) ->
+	ok        = iris_proto:send_subscribe(Sock, Topic),
+	{ok, Sub} = iris_topic:start_link(self(), Module, Args, Options),
+	Limiter   = iris_topic:limiter(Sub),
+	true      = ets:insert_new(State#state.subLive, {Topic, Sub, Limiter}),
+	{reply, ok, State};
 
 %% Relays an event to the Iris node for topic publishing.
 handle_call({publish, Topic, Event}, _From, State = #state{sock = Sock}) ->
@@ -257,13 +256,13 @@ handle_call({publish, Topic, Event}, _From, State = #state{sock = Sock}) ->
 
 %% Relays a subscription removal request to the Iris node (ensuring validity).
 handle_call({unsubscribe, Topic}, _From, State = #state{sock = Sock}) ->
-	% Make sure the subscription existed in the first hand
-	case ets:member(State#state.subLive, Topic) of
-		false -> {reply, {error, non_existent}};
-		true ->
-			ets:delete(State#state.subLive, Topic),
-			{reply, iris_proto:send_unsubscribe(Sock, Topic), State}
-	end;
+	% Look up the existing subscription and dump it from the list
+	[{Topic, Sub, _Limiter}] = ets:lookup(State#state.subLive, Topic),
+	true = ets:delete(State#state.subLive, Topic),
+
+	% Terminate the subscription both locally and remotely
+	ok = iris_topic:stop(Sub),
+	{reply, iris_proto:send_unsubscribe(Sock, Topic), State};
 
 %% Relays a tunneling request to the Iris node, waiting async with for the reply.
 handle_call({tunnel, Cluster, Timeout}, From, State = #state{sock = Sock}) ->
@@ -301,15 +300,6 @@ handle_cast({reply, Id, Response}, State) ->
 
 	% Reply to the pending process and return
 	gen_server:reply(Pending, Response),
-	{noreply, State};
-
-%% Delivers a published event if the subscription is still alive.
-handle_cast({publish, Topic, Event}, State) ->
-	% Make sure the subscription existed in the first hand
-	case ets:member(State#state.subLive, Topic) of
-		true  -> State#state.handler ! {publish, Topic, Event};
-		false -> ok
-	end,
 	{noreply, State};
 
 %% Accepts an incoming tunneling request from a remote app, assembling a local
