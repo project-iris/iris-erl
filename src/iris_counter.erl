@@ -6,6 +6,8 @@
 %% For details please see http://iris.karalabe.com/downloads#License
 
 %% Contains a very simple atomic counter to return auto incrementing values.
+%% Although it seems to violate all Erlang best practices, it is used solely for
+%% logging purposes, so don't fret about it too much.
 
 %% private
 
