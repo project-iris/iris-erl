@@ -35,7 +35,7 @@
 %% @end
 
 -module(iris).
--export([connect/3, tunnel/3, send/3, recv/2, close/1]).
+-export([connect/3, send/3, recv/2, close/1]).
 
 %% =============================================================================
 %% Iris type definitions
@@ -80,24 +80,7 @@ connect(Port, App, Handler) ->
 		Error            -> Error
 	end.
 
-%% @doc Opens a direct tunnel to an instance of app, allowing pairwise-exclusive
-%%      and order-guaranteed message passing between them.
-%%
-%%      The call blocks until the either the newly created tunnel is set up, or
-%%      a timeout occurs.
-%%
-%% @spec (Connection, App, Timeout) -> {ok, Tunnel} | {error, Reason}
-%%      Connection = connection()
-%%      App        = string()
-%%      Timeout    = pos_integer()
-%%      Tunnel     = tunnel()
-%%      Reason     = timeout | atom()
-%% @end
--spec tunnel(Connection :: connection(), App :: string(), Timeout :: pos_integer()) ->
-	{ok, Tunnel :: tunnel()} | {error, Reason :: atom()}.
 
-tunnel({connection, Connection}, App, Timeout) ->
-	iris_relay:tunnel(Connection, App, Timeout).
 
 %% @doc Sends a message over the tunnel to the remote pair, blocking until the
 %%      local relay node receives the message.

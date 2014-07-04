@@ -219,7 +219,7 @@
 
 -module(iris_server).
 -export([start/4, start/5, start_link/4, start_link/5, stop/1, reply/2]).
--export([handle_broadcast/2, handle_request/4]).
+-export([handle_broadcast/2, handle_request/4, handle_tunnel/2]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
@@ -404,6 +404,14 @@ handle_request(Limiter, Id, Request, Timeout) ->
   ok = iris_mailbox:schedule(Limiter, byte_size(Request), {handle_request, Id, Request, Expiry, Limiter}).
 
 
+%% @private
+%%
+-spec handle_tunnel(Server :: pid(), Tunnel :: pid()) -> ok.
+
+handle_tunnel(Server, Tunnel) ->
+	ok = gen_server:cast(Server, {handle_tunnel, Tunnel}).
+
+
 %% =============================================================================
 %% Internal helper functions
 %% =============================================================================
@@ -496,23 +504,16 @@ handle_info({handle_request, Id, Request, Expiry, Limiter}, State = #state{conn 
       end
 	end;
 
-%% Delivers a publish event to the callback and processes the result.
-handle_info({publish, Topic, Event}, State = #state{conn = Conn, hand_mod = Mod}) ->
-	case Mod:handle_publish(Topic, Event, State#state.hand_state, Conn) of
-		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
-		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
-	end;
-
-%% Delivers an inbound tunnel to the callback and processes the result.
-handle_info({tunnel, Tunnel}, State = #state{conn = Conn, hand_mod = Mod}) ->
-	case Mod:handle_tunnel(Tunnel, State#state.hand_state, Conn) of
-		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
-		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
-	end;
-
 %% Notifies the callback of the connection drop and processes the result.
 handle_info({drop, Reason}, State = #state{conn = Conn, hand_mod = Mod}) ->
 	case Mod:handle_drop(Reason, State#state.hand_state, Conn) of
+		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
+		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
+	end.
+
+%% Delivers an inbound tunnel to the callback and processes the result.
+handle_cast({handle_tunnel, Tunnel}, State = #state{conn = Conn, hand_mod = Mod}) ->
+	case Mod:handle_tunnel(Tunnel, State#state.hand_state, Conn) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
 	end.
@@ -533,7 +534,3 @@ terminate(Reason, State = #state{conn = Conn, hand_mod = Mod}) ->
 %% @private
 code_change(_OldVsn, _State, _Extra) ->
 	{error, unimplemented}.
-
-%% @private
-handle_cast(_Request, State) ->
-	{stop, unimplemented, State}.

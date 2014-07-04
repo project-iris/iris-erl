@@ -7,119 +7,106 @@
 
 -module(tunnel_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("configs.hrl").
 
 -behaviour(iris_server).
 -export([init/2, handle_broadcast/2, handle_request/3, handle_tunnel/3,
 	handle_drop/2, terminate/2]).
-
-%% Local Iris node's listener port
--define(RELAY_PORT, 55555).
 
 
 %% =============================================================================
 %% Tests
 %% =============================================================================
 
-% Opens a tunnel to itself and streams a batch of messages.
-single_test() ->
-	Messages = 1000,
+%% Tests multiple concurrent client and service tunnels.
+tunnel_test() ->
+  % Test specific configurations
+  ConfClients   = 25,
+  ConfServers   = 25,
+  ConfTunnels   = 25,
+  ConfExchanges = 25,
 
-	% Connect to the Iris network
-	{ok, Server, Link} = iris_server:start(?RELAY_PORT, "single", ?MODULE, nil),
+  Barrier = iris_barrier:new(ConfClients + ConfServers),
 
-	% Open a tunnel to self
-	{ok, Tunnel} = iris:tunnel(Link, "single", 500),
+  % Start up the concurrent requesting clients
+  lists:foreach(fun(Client) ->
+    spawn(fun() ->
+      try
+        % Connect to the local relay
+        {ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+        iris_barrier:sync(Barrier),
 
-	% Serialize a load of messages
-	lists:foreach(fun(Seq) ->
-		ok = iris:send(Tunnel, <<Seq:32>>, 500)
-	end, lists:seq(1, Messages)),
+        % Execute the tunnel construction, message exchange and verification
+        Id = io_lib:format("client #~p", [Client]),
+        ok = build_exchange_verify(Id, Conn, ConfTunnels, ConfExchanges),
+        iris_barrier:sync(Barrier),
 
-	% Read back the echo and verify
-	lists:foreach(fun(Seq) ->
-		{ok, <<Seq:32>>} = iris:recv(Tunnel, 500)
-	end, lists:seq(1, Messages)),
+        % Disconnect from the local relay
+        ok = iris_client:stop(Conn),
+        iris_barrier:exit(Barrier)
+      catch
+        Exception -> iris_barrier:exit(Exception), ok
+      end
+    end)
+  end, lists:seq(1, ConfClients)),
 
-	% Close the tunnel and the connection
-	ok = iris:close(Tunnel),
-	ok = iris_server:stop(Server).
+  % Start up the concurrent request services
+  lists:foreach(fun(Service) ->
+    spawn(fun() ->
+      try
+        % Register a new service to the relay
+        {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+        Conn = receive
+          {ok, Client} -> Client
+        end,
+        iris_barrier:sync(Barrier),
+
+        % Execute the tunnel construction, message exchange and verification
+        Id = io_lib:format("server #~p", [Service]),
+        ok = build_exchange_verify(Id, Conn, ConfTunnels, ConfExchanges),
+        iris_barrier:sync(Barrier),
+
+        % Unregister the service
+        ok = iris_server:stop(Server),
+        iris_barrier:exit(Barrier)
+      catch
+        Exception -> iris_barrier:exit(Exception), ok
+      end
+    end)
+  end, lists:seq(1, ConfServers)),
+
+  % Schedule the parallel operations
+  ok = iris_barrier:wait(Barrier),
+  ok = iris_barrier:wait(Barrier),
+  ok = iris_barrier:wait(Barrier).
 
 
-% Starts a batch of servers, each sending and echoing a stream of messages.
-multi_test() ->
-	Servers = 75,
-	Messages = 50,
+build_exchange_verify(Id, Conn, Tunnels, Exchanges) ->
+  Barrier = iris_barrier:new(Tunnels),
+  lists:foreach(fun(Tunnel) ->
+	  spawn(fun() ->
+	  	% Open a tunnel to the service cluster
+	  	{ok, Tun} = iris_client:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
 
-	% Start up the concurrent tunnelers
-	lists:foreach(fun(_) ->
-		Parent = self(),
-		spawn(fun() ->
-			% Start a single server and signal parent
-			{ok, Server, Link} = iris_server:start(?RELAY_PORT, "multi", ?MODULE, nil),
-			Parent ! {ok, self()},
+	  	% Tear down the tunnel
+	  	iris_tunnel:close(Tun),
+      iris_barrier:exit(Barrier)
+	  end)
+	end, lists:seq(1, Tunnels)),
 
-			% Wait for permission to continue
-			receive
-				cont -> ok
-			end,
+  % Schedule the parallel operations
+  ok = iris_barrier:wait(Barrier).
 
-			% Open a tunnel to somebody in the group
-			{ok, Tunnel} = iris:tunnel(Link, "multi", 1000),
-
-			% Serialize a load of messages
-			lists:foreach(fun(Seq) ->
-				ok = iris:send(Tunnel, <<Seq:32>>, 1000)
-			end, lists:seq(1, Messages)),
-
-			% Read back the echo and verify
-			lists:foreach(fun(Seq) ->
-				{ok, <<Seq:32>>} = iris:recv(Tunnel, 1000)
-			end, lists:seq(1, Messages)),
-
-			% Close the tunnel
-			ok = iris:close(Tunnel),
-
-			% Signal the parent and wait for permission to terminate
-			Parent ! done,
-			receive
-				term -> ok
-			end,
-
-			% Terminate the server and signal parent
-			ok = iris_server:stop(Server),
-			Parent ! stop
-		end)
-	end, lists:seq(1, Servers)),
-
-	% Wait for all the inits and permit continues
-	Pids = lists:map(fun(_) ->
-		receive
-			{ok, Pid} -> Pid
-		end
-	end, lists:seq(1, Servers)),
-	lists:foreach(fun(Pid) -> Pid ! cont end, Pids),
-
-	% Wait for all the servers to finish the tunnel tests and permit termination
-	lists:foreach(fun(_) ->
-		receive
-			done -> ok
-		end
-	end, lists:seq(1, Servers)),
-	lists:foreach(fun(Pid) -> Pid ! term end, Pids),
-
-	% Wait for all the terminations
-	lists:foreach(fun(_) ->
-		receive
-			stop -> ok
-		end
-	end, lists:seq(1, Servers)).
 
 %% =============================================================================
 %% Iris server callback methods
 %% =============================================================================
 
 %% Simply saves the parent tester for reporting events.
-init(_Conn, nil) -> {ok, nil}.
+%% Simply saves the parent tester for reporting events.
+init(Conn, Parent) ->
+  Parent ! {ok, Conn},
+  {ok, nil}.
 
 %% Spawns a new process that echoes back all tunnel data.
 handle_tunnel(Tunnel, State, _Link) ->
@@ -127,13 +114,14 @@ handle_tunnel(Tunnel, State, _Link) ->
 	{noreply, State}.
 
 echoer(Tunnel) ->
-	case iris:recv(Tunnel, infinity) of
-		{ok, Message} ->
-			ok = iris:send(Tunnel, Message, infinity),
-			echoer(Tunnel);
-		{error, _Reason} ->
-			ok = iris:close(Tunnel)
-	end.
+	%case iris:recv(Tunnel, infinity) of
+%		{ok, Message} ->
+%			ok = iris:send(Tunnel, Message, infinity),
+%			echoer(Tunnel);
+%		{error, _Reason} ->
+%			ok = iris:close(Tunnel)
+%	end.
+	ok = iris_tunnel:close(Tunnel).
 
 %% No state to clean up.
 terminate(_Reason, _State) -> ok.

@@ -7,7 +7,7 @@
 
 -module(iris_client).
 -export([start/1, start_link/1, stop/1]).
--export([broadcast/3, request/4, subscribe/5, publish/3, unsubscribe/2]).
+-export([broadcast/3, request/4, subscribe/5, publish/3, unsubscribe/2, tunnel/3]).
 
 
 -spec start(Port :: pos_integer()) ->
@@ -72,8 +72,8 @@ request(Client, Cluster, Request, Timeout) ->
 %%      event delivery. This is caused by subscription propagation through the
 %%      network.
 %%
-%% @spec (Connection, Topic) -> ok | {error, Reason}
-%%      Connection = connection()
+%% @spec (Client, Topic) -> ok | {error, Reason}
+%%      Client = pid()
 %%      Topic      = string()
 %%      Reason     = atom()
 %% @end
@@ -90,8 +90,8 @@ subscribe(Client, Topic, Module, Args, Options) ->
 %%
 %%      The call blocks until the message is sent to the relay node.
 %%
-%% @spec (Connection, Topic, Event) -> ok | {error, Reason}
-%%      Connection = connection()
+%% @spec (Client, Topic, Event) -> ok | {error, Reason}
+%%      Client = pid()
 %%      Topic      = string()
 %%      Event      = binary()
 %%      Reason     = atom()
@@ -107,8 +107,8 @@ publish(Client, Topic, Event) ->
 %%
 %%      The call blocks until the message is sent to the relay node.
 %%
-%% @spec (Connection, Topic) -> ok | {error, Reason}
-%%      Connection = connection()
+%% @spec (Client, Topic) -> ok | {error, Reason}
+%%      Client = pid()
 %%      Topic      = string()
 %%      Reason     = atom()
 %% @end
@@ -117,3 +117,23 @@ publish(Client, Topic, Event) ->
 
 unsubscribe(Client, Topic) ->
 	iris_client:unsubscribe(Client, Topic).
+
+
+%% @doc Opens a direct tunnel to an instance of app, allowing pairwise-exclusive
+%%      and order-guaranteed message passing between them.
+%%
+%%      The call blocks until the either the newly created tunnel is set up, or
+%%      a timeout occurs.
+%%
+%% @spec (Client, Cluster, Timeout) -> {ok, Tunnel} | {error, Reason}
+%%      Client = pid()
+%%      Cluster        = string()
+%%      Timeout    = pos_integer()
+%%      Tunnel     = tunnel()
+%%      Reason     = timeout | atom()
+%% @end
+-spec tunnel(Client :: pid(), Cluster :: string(), Timeout :: pos_integer()) ->
+	{ok, Tunnel :: pid()} | {error, Reason :: atom()}.
+
+tunnel(Client, Cluster, Timeout) ->
+	iris_conn:tunnel(Client, Cluster, Timeout).

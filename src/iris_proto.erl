@@ -18,7 +18,7 @@
 	send_subscribe/2, send_publish/3, send_unsubscribe/2, send_close/1,
 	send_tunnel_init/4, send_tunnel_confirm/3, send_tunnel_allowance/3,
 	send_tunnel_transfer/4, send_tunnel_close/2, proc_init/1]).
--export([start_link/4, process/5]).
+-export([start_link/5, process/6]).
 
 % Packet opcodes
 -define(OP_INIT,         16#00). % Out: connection initiation            | In: connection acceptance
@@ -305,8 +305,7 @@ proc_publish(Socket, Topics) ->
 proc_tunnel_init(Socket, Owner) ->
 	{ok, Id}         = recv_varint(Socket),
 	{ok, ChunkLimit} = recv_varint(Socket),
-	Owner ! {tunnel_init, Id, ChunkLimit},
-	ok.
+	ok = iris_conn:handle_tunnel_init(Owner, Id, ChunkLimit).
 
 %% Retrieves a tunnel construction result.
 -spec proc_tunnel_result(Socket :: port(), Owner :: pid()) -> ok.
@@ -314,32 +313,39 @@ proc_tunnel_init(Socket, Owner) ->
 proc_tunnel_result(Socket, Owner) ->
 	{ok, Id}      = recv_varint(Socket),
 	{ok, Timeout} = recv_bool(Socket),
-	case Timeout of
-		true -> Owner ! {tunnel_result, Id, {error, timeout}};
+	ok = case Timeout of
+		true -> iris_conn:handle_tunnel_result(Owner, Id, {error, timeout});
 		false ->
 			{ok, ChunkLimit} = recv_varint(Socket),
-			Owner ! {tunnel_result, Id, {ok, ChunkLimit}}
-	end,
-	ok.
+			iris_conn:handle_tunnel_result(Owner, Id, {ok, ChunkLimit})
+	end.
 
 %% Retrieves a tunnel transfer allowance message.
--spec proc_tunnel_allowance(Socket :: port(), Owner :: pid()) -> ok.
+-spec proc_tunnel_allowance(Socket :: port(), Tunnels :: pid()) -> ok.
 
-proc_tunnel_allowance(Socket, Owner) ->
+proc_tunnel_allowance(Socket, Tunnels) ->
 	{ok, Id}    = recv_varint(Socket),
 	{ok, Space} = recv_varint(Socket),
-	Owner ! {tunnel_alowance, Id, Space},
-	ok.
+
+	ok = case ets:lookup(Tunnels, Id) of
+		[{Id, Tunnel}] ->
+			ok = iris_tunnel:handle_allowance(Tunnel, Space);
+		[] -> ok
+	end.
 
 %% Retrieves a tunnel data exchange message.
--spec proc_tunnel_transfer(Socket :: port(), Owner :: pid()) -> ok.
+-spec proc_tunnel_transfer(Socket :: port(), Tunnels :: pid()) -> ok.
 
-proc_tunnel_transfer(Socket, Owner) ->
+proc_tunnel_transfer(Socket, Tunnels) ->
 	{ok, Id}         = recv_varint(Socket),
 	{ok, SizeOrCont} = recv_varint(Socket),
 	{ok, Payload}    = recv_binary(Socket),
-	Owner ! {tunnel_transfer, Id, SizeOrCont, Payload},
-	ok.
+
+	ok = case ets:lookup(Tunnels, Id) of
+		[{Id, Tunnel}] ->
+			ok = iris_tunnel:handle_transfer(Tunnel, SizeOrCont, Payload);
+		[] -> ok
+	end.
 
 %% Retrieves a tunnel closure notification.
 -spec proc_tunnel_close(Socket :: port(), Owner :: pid()) -> ok.
@@ -354,18 +360,18 @@ proc_tunnel_close(Socket, Owner) ->
 %% mostly to self(), with the exception of broadcasts and requests which have
 %% bounded mailboxes in front of the handler.
 -spec start_link(Socket :: port(), Broadcaster :: pid(), Requester :: pid(),
-	Topics :: ets:tid()) -> pid().
+	Topics :: ets:tid(), Tunnels :: ets:tid()) -> pid().
 
-start_link(Socket, Broadcaster, Requester, Topics) ->
-  spawn_link(?MODULE, process, [Socket, self(), Broadcaster, Requester, Topics]).
+start_link(Socket, Broadcaster, Requester, Topics, Tunnels) ->
+  spawn_link(?MODULE, process, [Socket, self(), Broadcaster, Requester, Topics, Tunnels]).
 
 
 %% Retrieves messages from the client connection and keeps processing them until
 %% either the relay closes (graceful close) or the connection drops.
--spec process(Socket :: port(), Owner :: pid(),
-  Broadcaster :: pid(), Requester :: pid(), Topics :: ets:tid()) -> no_return().
+-spec process(Socket :: port(), Owner :: pid(), Broadcaster :: pid(),
+	Requester :: pid(), Topics :: ets:tid(), Tunnels :: ets:tid()) -> no_return().
 
-process(Socket, Owner, Broadcaster, Requester, Topics) ->
+process(Socket, Owner, Broadcaster, Requester, Topics, Tunnels) ->
 	ok = case recv_byte(Socket) of
 		{ok, ?OP_BROADCAST}    -> proc_broadcast(Socket, Broadcaster);
 		{ok, ?OP_REQUEST}      -> proc_request(Socket, Requester);
@@ -373,11 +379,11 @@ process(Socket, Owner, Broadcaster, Requester, Topics) ->
 		{ok, ?OP_PUBLISH}      -> proc_publish(Socket, Topics);
 		{ok, ?OP_TUN_INIT}     -> proc_tunnel_init(Socket, Owner);
 		{ok, ?OP_TUN_CONFIRM}  -> proc_tunnel_result(Socket, Owner);
-    {ok, ?OP_TUN_ALLOW}    -> proc_tunnel_allowance(Socket, Owner);
-		{ok, ?OP_TUN_TRANSFER} -> proc_tunnel_transfer(Socket, Owner);
+    {ok, ?OP_TUN_ALLOW}    -> proc_tunnel_allowance(Socket, Tunnels);
+		{ok, ?OP_TUN_TRANSFER} -> proc_tunnel_transfer(Socket, Tunnels);
 		{ok, ?OP_TUN_CLOSE}    -> proc_tunnel_close(Socket, Owner);
 		{ok, ?OP_CLOSE} ->
 			{ok, ""} = proc_close(Socket),
 			exit(ok)
 	end,
-	process(Socket, Owner, Broadcaster, Requester, Topics).
+	process(Socket, Owner, Broadcaster, Requester, Topics, Tunnels).

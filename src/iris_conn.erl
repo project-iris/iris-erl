@@ -10,9 +10,9 @@
 -module(iris_conn).
 -export([connect/1, connect_link/1, register/4, register_link/3, close/1,
 	broadcast/3, request/4, reply/2, subscribe/5, publish/3, unsubscribe/2,
-	tunnel/3, tunnel_send/3, tunnel_ack/2, tunnel_close/2]).
+	tunnel/3, tunnel_send/4, tunnel_ack/2, tunnel_close/2]).
 
--export([handle_reply/3]).
+-export([handle_reply/3, handle_tunnel_init/3, handle_tunnel_result/3]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
@@ -112,18 +112,18 @@ unsubscribe(Connection, Topic) ->
 
 %% Forwards a tunneling request to the relay.
 -spec tunnel(Connection :: pid(), Cluster :: string(), Timeout :: pos_integer()) ->
-	{ok, Tunnel :: iris:tunnel()} | {error, Reason :: atom()}.
+	{ok, Tunnel :: pid()} | {error, Reason :: atom()}.
 
 tunnel(Connection, Cluster, Timeout) ->
 	gen_server:call(Connection, {tunnel, lists:flatten(Cluster), Timeout}, infinity).
 
 
 %% Forwards a tunnel data packet to the relay. Flow control should be already handled!
--spec tunnel_send(Connection :: pid(), TunId :: non_neg_integer(), Message :: binary()) ->
-	ok | {error, Reason :: atom()}.
+-spec tunnel_send(Connection :: pid(), TunId :: non_neg_integer(), SizeOrCont :: non_neg_integer(),
+	Message :: binary()) -> ok | {error, Reason :: atom()}.
 
-tunnel_send(Connection, TunId, Message) ->
-	gen_server:call(Connection, {tunnel_send, TunId, Message}, infinity).
+tunnel_send(Connection, TunId, SizeOrCont, Message) ->
+	gen_server:call(Connection, {tunnel_send, TunId, SizeOrCont, Message}, infinity).
 
 
 %% Forwards a tunnel data acknowledgment to the relay.
@@ -153,6 +153,20 @@ tunnel_close(Connection, TunId) ->
 
 handle_reply(Connection, Id, Response) ->
   gen_server:cast(Connection, {reply, Id, Response}).
+
+
+-spec handle_tunnel_init(Connection :: pid(), Id :: non_neg_integer(),
+	ChunkLimit :: pos_integer()) -> ok.
+
+handle_tunnel_init(Connection, Id, ChunkLimit) ->
+	gen_server:cast(Connection, {handle_tunnel_init, Id, ChunkLimit}).
+
+
+-spec handle_tunnel_result(Connection :: pid(), Id :: non_neg_integer(),
+	Result :: {ok, ChunkLimit :: pos_integer} | {error, timeout}) -> ok.
+
+handle_tunnel_result(Connection, Id, Result) ->
+	gen_server:cast(Connection, {handle_tunnel_result, Id, Result}).
 
 
 %% =============================================================================
@@ -191,13 +205,14 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}}) ->
 					% Wait for init confirmation
 					case iris_proto:proc_init(Sock) of
 						{ok, _Version} ->
-							Topics = ets:new(subscriptions, [set, protected]),
+							Topics  = ets:new(subscriptions, [set, protected]),
+							Tunnels = ets:new(tunnels, [set, protected]),
 
 							% Spawn the mailbox limiter threads and message receiver
 							process_flag(trap_exit, true),
               Broadcaster = iris_mailbox:start_link(Handler, broadcast, BroadcastMemory),
               Requester   = iris_mailbox:start_link(Handler, request, RequestMemory),
-              _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester, Topics),
+              _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester, Topics, Tunnels),
 
               % Assemble the internal state and return
 							{ok, #state{
@@ -208,7 +223,7 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}}) ->
 								subLive = Topics,
 								tunIdx  = 0,
 								tunPend = ets:new(tunnels_pending, [set, private]),
-								tunLive = ets:new(tunnels, [set, private]),
+								tunLive = Tunnels,
 								closer  = nil
 							}};
             {error, Reason} -> {stop, Reason}
@@ -272,16 +287,12 @@ handle_call({tunnel, Cluster, Timeout}, From, State = #state{sock = Sock}) ->
 	NewState = State#state{tunIdx = TunId+1},
 
 	% Send the request to the relay and finish with a pending reply
-	case iris_proto:send_tunnel_request(Sock, TunId, Cluster, iris_tunnel:buffer(), Timeout) of
-		ok    -> {noreply, NewState};
-		Error ->
-			ets:delete(State#state.tunPend, TunId),
-			{reply, Error, NewState}
-	end;
+	ok = iris_proto:send_tunnel_init(Sock, TunId, Cluster, Timeout),
+	{noreply, NewState};
 
 %% Relays a tunnel data packet to the Iris node.
-handle_call({tunnel_send, TunId, Message}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:send_tunnel_data(Sock, TunId, Message), State};
+handle_call({tunnel_send, TunId, SizeOrCont, Message}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:send_tunnel_transfer(Sock, TunId, SizeOrCont, Message), State};
 
 %% Relays a tunnel acknowledgment to the Iris node.
 handle_call({tunnel_ack, TunId}, _From, State = #state{sock = Sock}) ->
@@ -302,41 +313,41 @@ handle_cast({reply, Id, Response}, State) ->
 	gen_server:reply(Pending, Response),
 	{noreply, State};
 
-%% Accepts an incoming tunneling request from a remote app, assembling a local
-%% tunnel with the given send window and replies to the relay with the final
+%% Accepts an incoming tunneling request from a remote cluster, assembling a local
+%% tunnel with the given chunking limit and replies to the relay with the final
 %% permanent tunnel id.
-handle_cast({tunnel_request, TmpId, Buffer}, State = #state{sock = Sock}) ->
+handle_cast({handle_tunnel_init, BuildId, ChunkLimit}, State = #state{sock = Sock}) ->
 	% Create the local tunnel endpoint
 	TunId = State#state.tunIdx,
-	{ok, Tunnel} = gen_server:start(iris_tunnel, {self(), TunId, Buffer}, []),
+	{ok, Tunnel} = iris_tunnel:start_link(TunId, ChunkLimit),
 	true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
 
 	% Acknowledge the tunnel creation to the relay
-	ok = iris_proto:send_tunnel_reply(Sock, TmpId, TunId, iris_tunnel:buffer()),
+	ok = iris_proto:send_tunnel_confirm(Sock, BuildId, TunId),
 
 	% Notify the handler of the new tunnel
-	State#state.handler ! {tunnel, {tunnel, Tunnel}},
+	ok = iris_server:handle_tunnel(State#state.handler, Tunnel),
 	{noreply, State#state{tunIdx = TunId+1}};
 
 % Delivers a reply to a pending tunneling request.
-handle_cast({tunnel_reply, TunId, Reply}, State) ->
+handle_cast({handle_tunnel_result, TunId, Result}, State) ->
 	% Fetch the result channel and remove from state
 	{TunId, Pending} = hd(ets:lookup(State#state.tunPend, TunId)),
 	ets:delete(State#state.tunPend, TunId),
 
 	% Reply to the pending process and return
-	Result = case Reply of
-		{ok, Buffer} ->
-			case gen_server:start(iris_tunnel, {self(), TunId, Buffer}, []) of
+	Reply = case Result of
+		{ok, ChunkLimit} ->
+			case iris_tunnel:start_link(TunId, ChunkLimit) of
 				{ok, Tunnel} ->
 					% Save the live tunnel
 					true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
-					{ok, {tunnel, Tunnel}};
+					{ok, Tunnel};
 				Error -> Error
 			end;
 		Error -> Error
 	end,
-	gen_server:reply(Pending, Result),
+	gen_server:reply(Pending, Reply),
 	{noreply, State};
 
 % Delivers a data packet to a specific tunnel.
