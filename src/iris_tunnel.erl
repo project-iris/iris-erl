@@ -9,7 +9,7 @@
 
 -module(iris_tunnel).
 -export([send/3, recv/2, close/1]).
--export([start_link/2, handle_allowance/2, handle_transfer/3]).
+-export([start_link/2, handle_allowance/2, handle_transfer/3, handle_close/2]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
@@ -39,13 +39,14 @@ recv(Tunnel, Timeout) ->
 	ok | {error, Reason :: atom()}.
 
 close(Tunnel) ->
+  io:format(user, "tunnel close requested~n", []),
 	gen_server:call(Tunnel, close, infinity).
 
 -spec start_link(Id :: non_neg_integer(), ChunkLimit :: pos_integer()) ->
 	{ok, Server :: pid()} | {error, Reason :: term()}.
 
 start_link(Id, ChunkLimit) ->
-	gen_server:start_link(?MODULE, {self(), Id, ChunkLimit}, []).
+	gen_server:start(?MODULE, {self(), Id, ChunkLimit}, []).
 
 
 %% =============================================================================
@@ -77,6 +78,14 @@ handle_transfer(Tunnel, SizeOrCont, Payload) ->
   ok = gen_server:cast(Tunnel, {handle_transfer, SizeOrCont, Payload}).
 
 
+%% @private
+%% Schedules an application transfer for the service handler to process.
+-spec handle_close(Tunnel :: pid(), Reason :: string()) -> ok.
+
+handle_close(Tunnel, Reason) ->
+  ok = gen_server:cast(Tunnel, {handle_close, Reason}).
+
+
 %% =============================================================================
 %% Generic server internal state
 %% =============================================================================
@@ -94,7 +103,9 @@ handle_transfer(Tunnel, SizeOrCont, Payload) ->
 	atoiSpace, %% Application to Iris space allowance
 	atoiTasks, %% Application to Iris pending send tasks
 
-	term       %% Termination flag to prevent new sends
+	term,      %% Termination flag to prevent new sends
+  closer,    %% Processes waiting for the close ack
+  stat       %% Failure reason, if any received
 }).
 
 
@@ -113,7 +124,9 @@ init({Conn, Id, ChunkLimit}) ->
 		itoaTasks  = [],
 		atoiSpace  = 0,
 		atoiTasks  = [],
-		term       = false
+		term       = false,
+    closer     = nil,
+    stat       = ""
 	}}.
 
 %% Forwards an outbound message to the remote endpoint of the conn. If the send
@@ -140,7 +153,7 @@ handle_call({schedule_send, Payload, Timeout}, From, State = #state{chunkLimit =
 			_ -> 0
 		end,
 		Chunk = binary:part(Payload, (Index - 1) * Limit, erlang:min(Index * Limit, Size)),
-		Task = case Index < Pieces of 
+		Task = case Index < Pieces of
 			true  -> {Id, SizeOrCont, Chunk};
 			false -> {Id, SizeOrCont, Chunk, From, TRef}
 		end,
@@ -175,12 +188,13 @@ handle_call({recv, _Timeout}, _From, State = #state{itoaBuf = [Msg | Rest]}) ->
 
 %% Notifies the conn of the close request (which may or may not forward it to
 %% the Iris node), and terminates the process.
-handle_call(close, _From, State = #state{}) ->
-	Res = case State#state.term of
-		false -> iris_conn:tunnel_close(State#state.conn, State#state.id);
-		true  -> ok
-	end,
-	{stop, normal, Res, State}.
+handle_call(close, From, State = #state{}) ->
+	case State#state.term of
+    true  -> {stop, normal, State#state.stat, State};
+		false ->
+      ok = iris_conn:tunnel_close(State#state.conn, State#state.id),
+      {noreply, State#state{closer = From}}
+	end.
 
 %% If there is enough allowance and data schedules, sends a chunk to the relay.
 handle_cast(potentially_send, State = #state{atoiTasks = []}) ->
@@ -198,7 +212,7 @@ handle_cast(potentially_send, State = #state{atoiTasks = [Task | Rest], atoiSpac
 				{_Id, _SizeOrCont, _Chunk}             -> ok;
 				{_Id, _SizeOrCont, _Chunk, From, TRef} ->
 					{ok, cancel} = timer:cancel(TRef),
-					ok = gen_server:reply(From, ok)
+					gen_server:reply(From, ok)
 			end,
 			{noreply, State#state{atoiTasks = Rest}};
 		false -> {noreply, State}
@@ -209,6 +223,46 @@ handle_cast({handle_allowance, Space}, State = #state{atoiSpace = Allowance}) ->
 	ok = potentially_send(),
 	{noreply, State#state{atoiSpace = Allowance + Space}};
 
+%% Handles the graceful remote closure of the tunnel.
+handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->
+  Status = case Reason of
+    [] -> ok;
+    _  -> {error, Reason}
+  end,
+
+  % Notify all pending receives of the closure
+  lists:foreach(fun({_, From, TRef}) ->
+    case TRef of
+      nil    -> ok;
+      _Other -> {ok, cancel} = timer:cancel(TRef)
+    end,
+    gen_server:reply(From, {error, closed})
+  end, State#state.itoaTasks),
+
+  % Notify all pending sends of the closure
+  lists:foreach(fun(Task) ->
+    case Task of
+      {_Id, _SizeOrCont, _Chunk, From, TRef} ->
+        case TRef of
+          nil    -> ok;
+          _Other -> {ok, cancel} = timer:cancel(TRef)
+        end,
+        gen_server:reply(From, {error, closed});
+      {_Id, _SizeOrCont, _Chunk} -> ok
+    end
+  end, State#state.atoiTasks),
+
+  % Notify the connection to dump the tunnel
+  ok = iris_conn:handle_tunnel_close(Conn, Id),
+
+  % Notify the closer (if any) of the termination
+  io:format(user, "tunnel closing ~p ~p~n", [State#state.id, Status]),
+  case State#state.closer of
+    nil  -> {noreply, State#state{itoaTasks = [], term = true, stat = Status}};
+    From ->
+      gen_server:reply(From, Status),
+      {stop, normal, State#state{itoaTasks = [], term = true, stat = Reason}}
+  end;
 
 %% Accepts an inbound data packet, and either delivers it to a pending receive
 %% or buffers it locally.
@@ -244,32 +298,7 @@ handle_info({timeout, recv, Id}, State = #state{itoaTasks = Pend}) ->
 		false         -> ok;
 		{Id, From, _} -> gen_server:reply(From, {error, timeout})
 	end,
-	{noreply, State#state{itoaTasks = lists:keydelete(Id, 1, Pend)}};
-
-%% Sets the tunnel's closed flag, preventing new sends from going through. Any
-%% data already received will be available for extraction before any error is
-%% returned.
-handle_info(close, State) ->
-	% Notify all pending receives of the closure
-	lists:foreach(fun({_, From, TRef}) ->
-		case TRef of
-			nil    -> ok;
-			_Other ->	{ok, cancel} = timer:cancel(TRef)
-		end,
-		gen_server:reply(From, {error, closed})
-	end, State#state.itoaTasks),
-
-	% Notify all pending sends of the closure
-	lists:foreach(fun({_, From, _Message, TRef}) ->
-		case TRef of
-			nil    -> ok;
-			_Other ->	{ok, cancel} = timer:cancel(TRef)
-		end,
-		gen_server:reply(From, {error, closed})
-	end, State#state.atoiTasks),
-
-	% Clean out the pending queue and set the term flag
-	{noreply, State#state{itoaTasks = [], term = true}}.
+	{noreply, State#state{itoaTasks = lists:keydelete(Id, 1, Pend)}}.
 
 %% Cleanup method, does nothing really.
 terminate(_Reason, _State) -> ok.

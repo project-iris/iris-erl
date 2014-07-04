@@ -321,7 +321,7 @@ proc_tunnel_result(Socket, Owner) ->
 	end.
 
 %% Retrieves a tunnel transfer allowance message.
--spec proc_tunnel_allowance(Socket :: port(), Tunnels :: pid()) -> ok.
+-spec proc_tunnel_allowance(Socket :: port(), Tunnels :: ets:tid()) -> ok.
 
 proc_tunnel_allowance(Socket, Tunnels) ->
 	{ok, Id}    = recv_varint(Socket),
@@ -334,7 +334,7 @@ proc_tunnel_allowance(Socket, Tunnels) ->
 	end.
 
 %% Retrieves a tunnel data exchange message.
--spec proc_tunnel_transfer(Socket :: port(), Tunnels :: pid()) -> ok.
+-spec proc_tunnel_transfer(Socket :: port(), Tunnels :: ets:tid()) -> ok.
 
 proc_tunnel_transfer(Socket, Tunnels) ->
 	{ok, Id}         = recv_varint(Socket),
@@ -348,13 +348,17 @@ proc_tunnel_transfer(Socket, Tunnels) ->
 	end.
 
 %% Retrieves a tunnel closure notification.
--spec proc_tunnel_close(Socket :: port(), Owner :: pid()) -> ok.
+-spec proc_tunnel_close(Socket :: port(), Tunnels :: ets:tid()) -> ok.
 
-proc_tunnel_close(Socket, Owner) ->
+proc_tunnel_close(Socket, Tunnels) ->
 	{ok, Id}     = recv_varint(Socket),
 	{ok, Reason} = recv_string(Socket),
-	Owner ! {tunnel_close, Id, Reason},
-	ok.
+
+  ok = case ets:lookup(Tunnels, Id) of
+    [{Id, Tunnel}] ->
+      ok = iris_tunnel:handle_close(Tunnel, Reason);
+    [] -> ok
+  end.
 
 %% Starts a new packet processor, reading from the given socket and dispatching
 %% mostly to self(), with the exception of broadcasts and requests which have
@@ -381,7 +385,7 @@ process(Socket, Owner, Broadcaster, Requester, Topics, Tunnels) ->
 		{ok, ?OP_TUN_CONFIRM}  -> proc_tunnel_result(Socket, Owner);
     {ok, ?OP_TUN_ALLOW}    -> proc_tunnel_allowance(Socket, Tunnels);
 		{ok, ?OP_TUN_TRANSFER} -> proc_tunnel_transfer(Socket, Tunnels);
-		{ok, ?OP_TUN_CLOSE}    -> proc_tunnel_close(Socket, Owner);
+		{ok, ?OP_TUN_CLOSE}    -> proc_tunnel_close(Socket, Tunnels);
 		{ok, ?OP_CLOSE} ->
 			{ok, ""} = proc_close(Socket),
 			exit(ok)

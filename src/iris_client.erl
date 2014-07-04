@@ -9,17 +9,18 @@
 -export([start/1, start_link/1, stop/1]).
 -export([broadcast/3, request/4, subscribe/5, publish/3, unsubscribe/2, tunnel/3]).
 
-
 -spec start(Port :: pos_integer()) ->
 	{ok, Client :: pid()} | {error, Reason :: term()}.
 
-start(Port) -> iris_conn:connect(Port).
+start(Port) ->
+  iris_conn:connect(Port).
 
 
 -spec start_link(Port :: pos_integer()) ->
 	{ok, Client :: pid()} | {error, Reason :: term()}.
 
-start_link(Port) ->	iris_conn:connect_link(Port).
+start_link(Port) ->
+  iris_conn:connect_link(Port).
 
 
 -spec stop(Client :: pid()) ->
