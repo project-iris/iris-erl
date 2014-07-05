@@ -361,7 +361,7 @@ reply(Client, Reply) ->
 -spec handle_broadcast(Limiter :: pid(), Message :: binary()) -> ok.
 
 handle_broadcast(Limiter, Message) ->
-  ok = iris_mailbox:schedule(Limiter, Message, {handle_broadcast, Message, Limiter}).
+  ok = iris_mailbox:schedule(Limiter, {handle_broadcast, Message}).
 
 
 %% @private
@@ -371,7 +371,7 @@ handle_broadcast(Limiter, Message) ->
 
 handle_request(Limiter, Id, Request, Timeout) ->
   Expiry = timestamp() + Timeout * 1000,
-  ok = iris_mailbox:schedule(Limiter, Request, {handle_request, Id, Request, Expiry, Limiter}).
+  ok = iris_mailbox:schedule(Limiter, {handle_request, Id, Request, Timeout, Expiry}).
 
 
 %% @private
@@ -463,8 +463,8 @@ handle_call(stop, _From, State = #state{conn = Conn}) ->
 
 %% @private
 %% Delivers a broadcast message to the callback and processes the result.
-handle_info({Index, {handle_broadcast, Message, Limiter}}, State = #state{hand_mod = Mod}) ->
-  iris_logger:debug(State#state.logger, "handling scheduled broadcast", [{broadcast, Index}]),
+handle_info({LogCtx, {handle_broadcast, Message}, Limiter}, State = #state{hand_mod = Mod}) ->
+  iris_logger:debug(State#state.logger, "handling scheduled broadcast", [LogCtx]),
   iris_mailbox:replenish(Limiter, byte_size(Message)),
 	case Mod:handle_broadcast(Message, State#state.hand_state) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
@@ -472,11 +472,18 @@ handle_info({Index, {handle_broadcast, Message, Limiter}}, State = #state{hand_m
 	end;
 
 %% Delivers a request to the callback and processes the result.
-handle_info({Index, {handle_request, Id, Request, Expiry, Limiter}}, State = #state{conn = Conn, hand_mod = Mod}) ->
+handle_info({LogCtx, {handle_request, Id, Request, Timeout, Expiry}, Limiter}, State = #state{conn = Conn, hand_mod = Mod}) ->
   iris_mailbox:replenish(Limiter, byte_size(Request)),
-  case Expiry < timestamp() of
-    true  -> {noreply, State};
+
+  Now = timestamp(),
+  case Expiry < Now of
+    true  ->
+      iris_logger:error(State#state.logger, "dumping expired scheduled request",
+        [LogCtx, {scheduled, Timeout + (Now - Expiry) / 1000}, {timeout, Timeout}, {expired, (Now - Expiry) / 1000}]
+      ),
+      {noreply, State};
     false ->
+      iris_logger:debug(State#state.logger, "handling scheduled request", [LogCtx]),
       From = {Conn, Id},
     	case Mod:handle_request(Request, From, State#state.hand_state) of
     		{reply, Response, NewState} ->

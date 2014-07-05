@@ -219,8 +219,8 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}, Logger}) ->
 
 							% Spawn the mailbox limiter threads and message receiver
 							process_flag(trap_exit, true),
-              Broadcaster = iris_mailbox:start_link(Handler, broadcast, BroadcastMemory, Logger),
-              Requester   = iris_mailbox:start_link(Handler, request, RequestMemory, Logger),
+              Broadcaster = iris_mailbox:start_link(Handler, BroadcastMemory, Logger),
+              Requester   = iris_mailbox:start_link(Handler, RequestMemory, Logger),
               _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester, Topics, Tunnels),
 
               % Assemble the internal state and return
@@ -262,11 +262,17 @@ handle_call({request, Cluster, Request, Timeout}, From, State = #state{sock = So
 	NewState = State#state{reqIdx = ReqId+1},
 
 	% Send the request to the relay and finish with a pending reply
+  iris_logger:debug(State#state.logger, "sending new request",
+    [{local_request, ReqId}, {cluster, Cluster}, {data, Request}, {timeout, Timeout}]
+  ),
 	ok = iris_proto:send_request(Sock, ReqId, Cluster, Request, Timeout),
 	{noreply, NewState};
 
 %% Relays a request reply to the Iris node.
 handle_call({reply, ReqId, Response}, _From, State = #state{sock = Sock}) ->
+  iris_logger:debug(State#state.logger, "replying to handled request",
+    [{temore_request, ReqId}, {response, Response}]
+  ),
 	{reply, iris_proto:send_reply(Sock, ReqId, Response), State};
 
 %% Relays a subscription request to the Iris node (taking care of duplicates).
