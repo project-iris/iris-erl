@@ -8,7 +8,7 @@
 %% @private
 
 -module(iris_conn).
--export([connect/1, connect_link/1, register/4, register_link/3, close/1,
+-export([connect/2, connect_link/2, register/5, register_link/5, close/1,
 	broadcast/3, request/4, reply/2, subscribe/5, publish/3, unsubscribe/2,
 	tunnel/3, tunnel_send/4, tunnel_ack/2, tunnel_close/2]).
 
@@ -25,36 +25,37 @@
 %% =============================================================================
 
 %% Starts the gen_server responsible for a client connection.
--spec connect(Port :: pos_integer()) ->
+-spec connect(Port :: pos_integer(), Logger :: iris_logger:logger()) ->
 	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-connect(Port) ->
-	gen_server:start(?MODULE, {Port, "", nil, {0, 0}}, []).
+connect(Port, Logger) ->
+	gen_server:start(?MODULE, {Port, "", nil, {0, 0}, Logger}, []).
 
 
 %% Starts the gen_server responsible for a client connection and links it.
--spec connect_link(Port :: pos_integer()) ->
+-spec connect_link(Port :: pos_integer(), Logger :: iris_logger:logger()) ->
 	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-connect_link(Port) ->
-	gen_server:start_link(?MODULE, {Port, "", nil, {0, 0}}, []).
+connect_link(Port, Logger) ->
+	gen_server:start_link(?MODULE, {Port, "", nil, {0, 0}, Logger}, []).
 
 
 %% Starts the gen_server responsible for a service connection.
--spec register(Port :: pos_integer(), Cluster :: string(),
-  Handler :: pid(), Limits :: {pos_integer(), pos_integer()}) ->
+-spec register(Port :: pos_integer(), Cluster :: string(), Handler :: pid(),
+  Limits :: {pos_integer(), pos_integer()}, Logger :: iris_logger:logger()) ->
   {ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-register(Port, Cluster, Handler, Limits) ->
-  gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler, Limits}, []).
+register(Port, Cluster, Handler, Limits, Logger) ->
+  gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler, Limits, Logger}, []).
 
 
 %% Starts the gen_server responsible for a service connection.
--spec register_link(Port :: pos_integer(), Cluster :: string(), Handler :: pid()) ->
+-spec register_link(Port :: pos_integer(), Cluster :: string(), Handler :: pid(),
+  Limits :: {pos_integer(), pos_integer()}, Logger :: iris_logger:logger()) ->
   {ok, Connection :: pid()} | {error, Reason :: atom()}.
 
-register_link(Port, Cluster, Handler) ->
-  gen_server:start_link(?MODULE, {Port, lists:flatten(Cluster), Handler}, []).
+register_link(Port, Cluster, Handler, Limits, Logger) ->
+  gen_server:start_link(?MODULE, {Port, lists:flatten(Cluster), Handler, Limits, Logger}, []).
 
 
 %% Notifies the relay server of a graceful close request.
@@ -193,7 +194,8 @@ handle_tunnel_close(Connection, Id) ->
 	tunPend,  %% Tunnels in the process of creation
 	tunLive,  %% Active tunnels
 
-	closer    %% Process requesting the relay closure
+	closer,   %% Process requesting the relay closure
+  logger    %% Logger with connection id injected
 }).
 
 
@@ -202,7 +204,7 @@ handle_tunnel_close(Connection, Id) ->
 %% =============================================================================
 
 %% Connects to the locally running iris node and initiates the connection.
-init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}}) ->
+init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}, Logger}) ->
 	% Open the TCP connection
 	case gen_tcp:connect({127,0,0,1}, Port, [{active, false}, binary, {nodelay, true}]) of
 		{ok, Sock} ->
@@ -231,7 +233,8 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}}) ->
 								tunIdx  = 0,
 								tunPend = ets:new(tunnels_pending, [set, private]),
 								tunLive = Tunnels,
-								closer  = nil
+								closer  = nil,
+                logger  = Logger
 							}};
             {error, Reason} -> {stop, Reason}
 					end;
@@ -242,6 +245,7 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}}) ->
 
 %% Sends a graceful close request to the relay. The reply will arrive async.
 handle_call(close, From, State = #state{sock = Sock}) ->
+  iris_logger:info(State#state.logger, "detaching from relay"),
   ok = iris_proto:send_close(Sock),
   {noreply, State#state{closer = From}};
 

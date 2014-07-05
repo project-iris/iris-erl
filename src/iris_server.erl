@@ -225,9 +225,6 @@
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
 	code_change/3]).
 
--define(DEFAULT_BROADCAST_MEMORY_LIMIT, 64 * 1024 * 1024).
--define(DEFAULT_REQUEST_MEMORY_LIMIT, 64 * 1024 * 1024).
-
 
 %% =============================================================================
 %% Iris server behavior definitions
@@ -257,42 +254,29 @@
 %% External API functions
 %% =============================================================================
 
+%% No option version of the extended start method. See the next method below.
 -spec start(Port :: pos_integer(), Cluster :: string(), Module :: atom(), Args :: term()) ->
 	{ok, Server :: pid()} | {error, Reason :: term()}.
 
 start(Port, Cluster, Module, Args) ->
 	start(Port, Cluster, Module, Args, []).
 
-
-%% @doc Creates and starts an Iris server process.
+%% @doc Connects to the Iris network and registers a new service instance as a
+%%      member of the specified service cluster.
 %%
-%%      The server will connect to the locally running Iris relay, and receive
-%%      all the inbound network events, conforming to the iris_server behavior.
+%%      All the inbound network events will be received by the specified handler
+%%      module, conforming to the iris_server behavior.
 %%
-%%      <ul>
-%%        <li>`Port' is the local TCP endpoint on which the Iris relay is
-%%             listening.</li>
-%%        <li>`Cluster' is the application group the server wishes to join.</li>
-%%        <li>`Module' is the name of the callback module</li>
-%%        <li>`Args' is an arbitrary term provided to `Module:init/1'</li>
-%%      </ul><ul>
-%%        <li>If the iris_server is successfully initialized, started and the
-%%            relay node connection made, `{ok, Server, Connection}' is returned,
-%%            where `Server' is the pid of the iris_server and `Connection' is
-%%            the data link to the relay to allow communication from outside the
-%%            iris_server handler too.</li>
-%%        <li>If `Module:init/1' fails or the connection to a local Iris node
-%%            cannot be made, the method returns with `{error, Reason}'.</li>
-%%      </ul>
-%%
-%% @spec (Port, Cluster, Module, Args, Options) -> {ok, Server, Connection} | {error, Reason}
-%%      Port       = pos_integer()
-%%      Cluster        = string()
-%%      Module     = atom()
-%%      Args       = term()
-%%      Server     = pid()
-%%      Connection = connection()
-%%      Reason     = atom()
+%% @spec (Port, Cluster, Module, Args, Options) -> {ok, Server} | {error, Reason}
+%%      Port    = pos_integer()
+%%      Cluster = string()
+%%      Module  = atom()
+%%      Args    = term()
+%%      Options = [Option]
+%%        Option = {broadcast_memory, Limit} | {request_memory, Limit}
+%%          Limit = pos_integer()
+%%      Server  = pid()
+%%      Reason  = term()
 %% @end
 -spec start(Port :: pos_integer(), Cluster :: string(), Module :: atom(),
 	Args :: term(), Options :: [{atom(), term()}]) ->
@@ -302,42 +286,29 @@ start(Port, Cluster, Module, Args, Options) ->
 	gen_server:start(?MODULE, {Port, Cluster, Module, Args, Options}, []).
 
 
+%% No option version of the extended start_link method. See the next method below.
 -spec start_link(Port :: pos_integer(), Cluster :: string(), Module :: atom(), Args :: term()) ->
 	{ok, Server :: pid()} | {error, Reason :: term()}.
 
 start_link(Port, Cluster, Module, Args) ->
 	start_link(Port, Cluster, Module, Args, []).
 
-
-%% @doc Creates and starts an Iris server process, linked to the caller.
+%% @doc Connects to the Iris network and registers a new service instance as a
+%%      member of the specified service cluster, linking it to the caller.
 %%
-%%      The server will connect to the locally running Iris relay, and receive
-%%      all the inbound network events, conforming to the iris_server behavior.
+%%      All the inbound network events will be received by the specified handler
+%%      module, conforming to the iris_server behavior.
 %%
-%%      <ul>
-%%        <li>`Port' is the local TCP endpoint on which the Iris relay is
-%%             listening.</li>
-%%        <li>`Cluster' is the application group the server wishes to join.</li>
-%%        <li>`Module' is the name of the callback module</li>
-%%        <li>`Args' is an arbitrary term provided to `Module:init/1'</li>
-%%      </ul><ul>
-%%        <li>If the iris_server is successfully initialized, started and the
-%%            relay node connection made, `{ok, Server, Connection}' is returned,
-%%            where `Server' is the pid of the iris_server and `Connection' is
-%%            the data link to the relay to allow communication from outside the
-%%            iris_server handler too.</li>
-%%        <li>If `Module:init/1' fails or the connection to a local Iris node
-%%            cannot be made, the method returns with `{error, Reason}'.</li>
-%%      </ul>
-%%
-%% @spec (Port, Cluster, Module, Args, Options) -> {ok, Server, Connection} | {error, Reason}
-%%      Port       = pos_integer()
-%%      Cluster        = string()
-%%      Module     = atom()
-%%      Args       = term()
-%%      Server     = pid()
-%%      Connection = connection()
-%%      Reason     = atom()
+%% @spec (Port, Cluster, Module, Args, Options) -> {ok, Server} | {error, Reason}
+%%      Port    = pos_integer()
+%%      Cluster = string()
+%%      Module  = atom()
+%%      Args    = term()
+%%      Options = [Option]
+%%        Option = {broadcast_memory, Limit} | {request_memory, Limit}
+%%          Limit = pos_integer()
+%%      Server  = pid()
+%%      Reason  = term()
 %% @end
 -spec start_link(Port :: pos_integer(), Cluster :: string(), Module :: atom(),
 	Args :: term(), Options :: [{atom(), term()}]) ->
@@ -347,11 +318,10 @@ start_link(Port, Cluster, Module, Args, Options) ->
 	gen_server:start_link(?MODULE, {Port, Cluster, Module, Args, Options}, []).
 
 
-%% @doc Gracefully terminates the server process.
+%% @doc Unregisters the service instance from the Iris network, removing all
+%%      subscriptions and closing all active tunnels.
 %%
-%%      <ul>
-%%        <li>`Server' is the pid of the iris_server to terminate.</li>
-%%      </ul>
+%%      The call blocks until the tear-down is confirmed by the Iris node.
 %%
 %% @spec (Server) -> ok | {error, Reason}
 %%      Server     = pid()
@@ -416,12 +386,28 @@ handle_tunnel(Server, Tunnel) ->
 %% Internal helper functions
 %% =============================================================================
 
-%% Get the current monotonic (erlanbg:now) timer's timestamp.
+%% Retrieves the current monotonic (erlang:now) timer's timestamp.
 -spec timestamp() -> pos_integer().
 
 timestamp() ->
   {Mega, Secs, Micro} = erlang:now(),
   Mega*1000*1000*1000*1000 + Secs * 1000 * 1000 + Micro.
+
+
+%% Loads the service limits, or defaults if not specified.
+-spec finalize_service_limits(Options :: [{atom(), term()}]) ->
+  {BroadcastMemory :: pos_integer(), RequestMemory :: pos_integer()}.
+
+finalize_service_limits(Options) ->
+  BroadcastMemory = case proplists:lookup(broadcast_memory, Options) of
+    none                       -> iris_limits:default_broadcast_memory();
+    {broadcast_memory, BLimit} -> BLimit
+  end,
+  RequestMemory = case proplists:lookup(request_memory, Options) of
+    none                     -> iris_limits:default_request_memory();
+    {request_memory, RLimit} -> RLimit
+  end,
+  {BroadcastMemory, RequestMemory}.
 
 
 %% =============================================================================
@@ -442,19 +428,18 @@ timestamp() ->
 %% @private
 %% Initializes the callback handler and connects to the local Iris relay node.
 init({Port, Cluster, Module, Args, Options}) ->
-  % Load the service limits (or defaults)
-  BroadcastMemory = case proplists:lookup(broadcast_memory, Options) of
-    none                       -> ?DEFAULT_BROADCAST_MEMORY_LIMIT;
-    {broadcast_memory, BLimit} -> BLimit
-  end,
-  RequestMemory = case proplists:lookup(request_memory, Options) of
-    none                     -> ?DEFAULT_REQUEST_MEMORY_LIMIT;
-    {request_memory, RLimit} -> RLimit
-  end,
-  ServiceLimits = {BroadcastMemory, RequestMemory},
+  %% Make sure the service limits have valid values
+  Limits = finalize_service_limits(Options),
+
+  Logger = iris_logger:new([{server, iris_counter:next_id(server)}]),
+  iris_logger:info(Logger, "registering new service", [
+    {relay_port, Port}, {cluster, Cluster},
+    {broadcast_limits, lists:flatten(io_lib:format("1T|~pB", [element(1, Limits)]))},
+    {request_limits, lists:flatten(io_lib:format("1T|~pB", [element(2, Limits)]))}
+  ]),
 
 	% Initialize the Iris connection
-	case iris_conn:register(Port, lists:flatten(Cluster), self(), ServiceLimits) of
+	case iris_conn:register(Port, lists:flatten(Cluster), self(), Limits, Logger) of
 		{ok, Conn} ->
 		  % Initialize the callback handler
 			case Module:init(Conn, Args) of

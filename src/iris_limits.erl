@@ -10,7 +10,15 @@
 %% private
 
 -module(iris_limits).
--export([default_tunnel_buffer/0]).
+-export([default_broadcast_memory/0, default_request_memory/0,
+  default_tunnel_buffer/0]).
+
+
+%% Memory allowance for pending broadcasts.
+default_broadcast_memory() -> 64 * 1024 * 1024.
+
+%% Memory allowance for pending requests.
+default_request_memory() -> 64 * 1024 * 1024.
 
 %% Size of a tunnel's input buffer.
 default_tunnel_buffer() -> 64 * 1024 * 1024.

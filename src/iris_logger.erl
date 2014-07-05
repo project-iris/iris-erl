@@ -13,7 +13,11 @@
 -compile([{parse_transform, lager_transform}]).
 -export([new/0, new/1, new/2, crit/2, crit/3, error/2, error/3, warn/2, warn/3,
   info/2, info/3, debug/2, debug/3]).
+-export_type([logger/0]).
 
+
+%% Contextual logger wrapper around basho's lager.
+-type logger() :: {logger, term(), term()}.
 
 -record(logger, {
   context,  %% Context associated with a logger

@@ -23,7 +23,7 @@ start(Port) ->
   Logger = iris_logger:new([{client, iris_counter:next_id(client)}]),
   iris_logger:info(Logger, "connecting new client", [{relay_port, Port}]),
 
-  Result = iris_conn:connect(Port),
+  Result = iris_conn:connect(Port, Logger),
   case Result of
     {ok, _Pid}      -> iris_logger:info(Logger, "client connection established");
     {error, Reason} -> iris_logger:warn(Logger, "failed to connect new client", [{reason, Reason}])
@@ -45,7 +45,7 @@ start_link(Port) ->
   Logger = iris_logger:new([{client, iris_counter:next_id(client)}]),
   iris_logger:info(Logger, "connecting and linking new client", [{relay_port, Port}]),
 
-  Result = iris_conn:connect_link(Port),
+  Result = iris_conn:connect_link(Port, Logger),
   case Result of
     {ok, _Pid}      -> iris_logger:info(Logger, "client connection established");
     {error, Reason} -> iris_logger:warn(Logger, "failed to connect new client", [{reason, Reason}])
@@ -53,8 +53,17 @@ start_link(Port) ->
   Result.
 
 
--spec stop(Client :: pid()) ->
-	ok | {error, Reason :: term()}.
+%% @doc Gracefully terminates the connection removing all subscriptions and
+%%      closing all active tunnels.
+%%
+%%      The call blocks until the connection tear-down is confirmed by the Iris
+%%      node.
+%%
+%% @spec (Client) -> ok | {error, Reason}
+%%      Client = pid()
+%%      Reason = term()
+%% @end
+-spec stop(Client :: pid()) -> ok | {error, Reason :: term()}.
 
 stop(Client) ->	iris_conn:close(Client).
 
