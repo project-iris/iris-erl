@@ -11,6 +11,8 @@
 
 -module(iris_logger).
 -compile([{parse_transform, lager_transform}]).
+-include_lib("lager/include/lager.hrl").
+
 -export([new/0, new/1, new/2, crit/2, crit/3, error/2, error/3, warn/2, warn/3,
   info/2, info/3, debug/2, debug/3]).
 -export_type([logger/0]).
@@ -24,6 +26,10 @@
   flattened %% Context flattened for optimization
 }).
 
+
+%% =============================================================================
+%% External API functions
+%% =============================================================================
 
 %% Creates a new logger without any associated context.
 new() -> #logger{context = [], flattened = ""}.
@@ -55,9 +61,16 @@ debug(Logger, Message)        -> log(debug, Logger, Message, []).
 debug(Logger, Message, Attrs) -> log(debug, Logger, Message, Attrs).
 
 
+%% =============================================================================
+%% Internal functions
+%% =============================================================================
+
 %% Enters a log entry into the lager ledger.
 log(Level, #logger{context = Ctx, flattened = Pref}, Message, Attrs) ->
-  lager:log(Level, Ctx ++ Attrs, "~s", [format(Pref, Message, Attrs)]).
+  case ?SHOULD_LOG(Level) of
+    true  -> lager:log(Level, Ctx ++ Attrs, "~s", [format(Pref, Message, Attrs)]);
+    false -> ok
+  end.
 
 
 %% Flattens a property list into a key-value assignments string.
@@ -74,5 +87,8 @@ flatten(Attributes) ->
 
 %% Since basho's lager logger doesn't support printing the metadata associated
 %% with log entries, override it and do it manually.
+format(Context, {Format, Args}, Attributes) ->
+  format(Context, lists:flatten(io_lib:format(Format, Args)), Attributes);
+
 format(Context, Message, Attributes) ->
   io_lib:format("~-40s~s~s", [Message, Context, flatten(Attributes)]).

@@ -12,7 +12,7 @@
 %% @private
 
 -module(iris_mailbox).
--export([start_link/3, schedule/3, replenish/2, limit/4]).
+-export([start_link/4, schedule/3, replenish/2]).
 
 
 %% =============================================================================
@@ -20,10 +20,11 @@
 %% =============================================================================
 
 %% Spawns a bounded mailbox forwarder and links it to the current process.
--spec start_link(Owner :: pid(), Type :: atom(), Limit :: pos_integer()) -> pid().
+-spec start_link(Owner :: pid(), Type :: atom(), Limit :: pos_integer(),
+  Logger :: iris_logger:logger()) -> pid().
 
-start_link(Owner, Type, Limit) ->
-  spawn_link(?MODULE, limit, [Owner, Type, Limit, 0]).
+start_link(Owner, Type, Limit, Logger) ->
+  spawn_link(fun() -> limit(Owner, Type, Limit, 0, 1, Logger) end).
 
 
 %% Schedules a message into the remote mailbox if and only if the associated
@@ -44,22 +45,32 @@ replenish(Limiter, Space) ->
 
 
 %% =============================================================================
-%% Internal API functions
+%% Internal functions
 %% =============================================================================
 
 %% Forwards inbound messages to the owner's message queue, given that the total
 %% memory consumption is below a threshold. Discards otherwise.
--spec limit(Owner :: pid(), Type :: atom(), Limit :: pos_integer(),
-  Used :: non_neg_integer()) -> no_return().
+-spec limit(Owner :: pid(), Type :: atom(), Limit :: pos_integer(), Used :: non_neg_integer(),
+  Id :: pos_integer(), Logger :: iris_logger:logger()) -> no_return().
 
-limit(Owner, Type, Limit, Used) ->
+limit(Owner, Type, Limit, Used, Id, Logger) ->
   receive
-    {schedule, Size, Message} when Used + Size =< Limit ->
-      Owner ! Message,
-      limit(Owner, Type, Limit, Used + Size);
-    {schedule, Size, _Message} ->
-      io:format("~p exceeded memory allowance: limit=~p used=~p size=~p~n", [Type, Limit, Used, Size]),
-      limit(Owner, Type, Limit, Used);
+    {schedule, Data, Message} ->
+      iris_logger:debug(Logger, {"scheduling arrived ~p", [Type]}, [{Type, Id}, {data, Data}]),
+
+      % Make sure there is enough memory for the message
+      Size = byte_size(Data),
+      case Used + Size =< Limit of
+        true ->
+          Owner ! {Id, Message},
+          limit(Owner, Type, Limit, Used + Size, Id + 1, Logger);
+        false ->
+          % Not enough memory in the message queue
+          iris_logger:error(Logger, {"~p exceeded memory allowance", [Type]},
+            [{Type, Id}, {limit, Limit}, {used, Used}, {size, Size}]
+          ),
+          limit(Owner, Type, Limit, Used, Id + 1, Logger)
+      end;
     {replenish, Space} ->
-      limit(Owner, Type, Limit, Used - Space)
+      limit(Owner, Type, Limit, Used - Space, Id, Logger)
   end.

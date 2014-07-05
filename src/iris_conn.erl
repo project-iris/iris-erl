@@ -219,8 +219,8 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}, Logger}) ->
 
 							% Spawn the mailbox limiter threads and message receiver
 							process_flag(trap_exit, true),
-              Broadcaster = iris_mailbox:start_link(Handler, broadcast, BroadcastMemory),
-              Requester   = iris_mailbox:start_link(Handler, request, RequestMemory),
+              Broadcaster = iris_mailbox:start_link(Handler, broadcast, BroadcastMemory, Logger),
+              Requester   = iris_mailbox:start_link(Handler, request, RequestMemory, Logger),
               _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester, Topics, Tunnels),
 
               % Assemble the internal state and return
@@ -251,6 +251,7 @@ handle_call(close, From, State = #state{sock = Sock}) ->
 
 %% Relays a message to the Iris node for broadcasting.
 handle_call({broadcast, Cluster, Message}, _From, State = #state{sock = Sock}) ->
+  iris_logger:debug(State#state.logger, "sending new broadcast", [{cluster, Cluster}, {data, Message}]),
 	{reply, iris_proto:send_broadcast(Sock, Cluster, Message), State};
 
 %% Relays a request to the Iris node, waiting async for the reply.

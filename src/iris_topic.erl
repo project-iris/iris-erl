@@ -61,7 +61,7 @@ limiter(Topic) ->
 -spec handle_event(Limiter :: pid(), Event :: binary()) -> ok.
 
 handle_event(Limiter, Event) ->
-  ok = iris_mailbox:schedule(Limiter, byte_size(Event), {handle_event, Event, Limiter}).
+  ok = iris_mailbox:schedule(Limiter, Event, {handle_event, Event, Limiter}).
 
 
 %% =============================================================================
@@ -90,7 +90,7 @@ init({Conn, Module, Args, Options}) ->
 
 	% Spawn the mailbox limiter threads
 	process_flag(trap_exit, true),
-  Limiter = iris_mailbox:start_link(self(), publish, EventMemory),
+  Limiter = iris_mailbox:start_link(self(), publish, EventMemory, iris_logger:new()),
 
   % Initialize the callback handler
 	case Module:init(Conn, Args) of
@@ -116,7 +116,7 @@ handle_call(stop, _From, State) ->
 
 %% @private
 %% Delivers a topic event to the callback and processes the result.
-handle_info({handle_event, Event, Limiter}, State = #state{hand_mod = Mod}) ->
+handle_info({Index, {handle_event, Event, Limiter}}, State = #state{hand_mod = Mod}) ->
   iris_mailbox:replenish(Limiter, byte_size(Event)),
 	case Mod:handle_event(Event, State#state.hand_state) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};

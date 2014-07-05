@@ -361,7 +361,7 @@ reply(Client, Reply) ->
 -spec handle_broadcast(Limiter :: pid(), Message :: binary()) -> ok.
 
 handle_broadcast(Limiter, Message) ->
-  ok = iris_mailbox:schedule(Limiter, byte_size(Message), {handle_broadcast, Message, Limiter}).
+  ok = iris_mailbox:schedule(Limiter, Message, {handle_broadcast, Message, Limiter}).
 
 
 %% @private
@@ -371,7 +371,7 @@ handle_broadcast(Limiter, Message) ->
 
 handle_request(Limiter, Id, Request, Timeout) ->
   Expiry = timestamp() + Timeout * 1000,
-  ok = iris_mailbox:schedule(Limiter, byte_size(Request), {handle_request, Id, Request, Expiry, Limiter}).
+  ok = iris_mailbox:schedule(Limiter, Request, {handle_request, Id, Request, Expiry, Limiter}).
 
 
 %% @private
@@ -417,7 +417,8 @@ finalize_service_limits(Options) ->
 -record(state, {
 	conn,       %% High level Iris connection
   hand_mod,   %% Handler callback module
-  hand_state  %% Handler internal state
+  hand_state, %% Handler internal state
+  logger      %% Logger with connection id injected
 }).
 
 
@@ -447,7 +448,8 @@ init({Port, Cluster, Module, Args, Options}) ->
 					{ok, #state{
 						conn       = Conn,
 						hand_mod   = Module,
-						hand_state = State
+						hand_state = State,
+            logger     = Logger
 					}};
 				{error, Reason} -> {stop, Reason}
 			end;
@@ -461,7 +463,8 @@ handle_call(stop, _From, State = #state{conn = Conn}) ->
 
 %% @private
 %% Delivers a broadcast message to the callback and processes the result.
-handle_info({handle_broadcast, Message, Limiter}, State = #state{hand_mod = Mod}) ->
+handle_info({Index, {handle_broadcast, Message, Limiter}}, State = #state{hand_mod = Mod}) ->
+  iris_logger:debug(State#state.logger, "handling scheduled broadcast", [{broadcast, Index}]),
   iris_mailbox:replenish(Limiter, byte_size(Message)),
 	case Mod:handle_broadcast(Message, State#state.hand_state) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
@@ -469,7 +472,7 @@ handle_info({handle_broadcast, Message, Limiter}, State = #state{hand_mod = Mod}
 	end;
 
 %% Delivers a request to the callback and processes the result.
-handle_info({handle_request, Id, Request, Expiry, Limiter}, State = #state{conn = Conn, hand_mod = Mod}) ->
+handle_info({Index, {handle_request, Id, Request, Expiry, Limiter}}, State = #state{conn = Conn, hand_mod = Mod}) ->
   iris_mailbox:replenish(Limiter, byte_size(Request)),
   case Expiry < timestamp() of
     true  -> {noreply, State};
