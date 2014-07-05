@@ -9,18 +9,48 @@
 -export([start/1, start_link/1, stop/1]).
 -export([broadcast/3, request/4, subscribe/5, publish/3, unsubscribe/2, tunnel/3]).
 
--spec start(Port :: pos_integer()) ->
-	{ok, Client :: pid()} | {error, Reason :: term()}.
+
+%% @doc Connects to the Iris network as a simple client.
+%%
+%% @spec (Port) -> {ok, Client} | {error, Reason}
+%%      Port   = pos_integer()
+%%      Client = pid()
+%%      Reason = term()
+%% @end
+-spec start(Port :: pos_integer()) ->	{ok, Client :: pid()} | {error, Reason :: term()}.
 
 start(Port) ->
-  iris_conn:connect(Port).
+  Logger = iris_logger:new([{client, iris_counter:next_id(client)}]),
+  iris_logger:info(Logger, "connecting new client", [{relay_port, Port}]),
+
+  Result = iris_conn:connect(Port),
+  case Result of
+    {ok, _Pid}      -> iris_logger:info(Logger, "client connection established");
+    {error, Reason} -> iris_logger:warn(Logger, "failed to connect new client", [{reason, Reason}])
+  end,
+  Result.
 
 
--spec start_link(Port :: pos_integer()) ->
-	{ok, Client :: pid()} | {error, Reason :: term()}.
+%% @doc Connects to the Iris network as a simple client and links the spawned
+%%      process to the current one.
+%%
+%% @spec (Port) -> {ok, Client} | {error, Reason}
+%%      Port   = pos_integer()
+%%      Client = pid()
+%%      Reason = term()
+%% @end
+-spec start_link(Port :: pos_integer()) -> {ok, Client :: pid()} | {error, Reason :: term()}.
 
 start_link(Port) ->
-  iris_conn:connect_link(Port).
+  Logger = iris_logger:new([{client, iris_counter:next_id(client)}]),
+  iris_logger:info(Logger, "connecting and linking new client", [{relay_port, Port}]),
+
+  Result = iris_conn:connect_link(Port),
+  case Result of
+    {ok, _Pid}      -> iris_logger:info(Logger, "client connection established");
+    {error, Reason} -> iris_logger:warn(Logger, "failed to connect new client", [{reason, Reason}])
+  end,
+  Result.
 
 
 -spec stop(Client :: pid()) ->

@@ -39,7 +39,6 @@ recv(Tunnel, Timeout) ->
 	ok | {error, Reason :: atom()}.
 
 close(Tunnel) ->
-  io:format(user, "tunnel close requested~n", []),
 	gen_server:call(Tunnel, close, infinity).
 
 -spec start_link(Id :: non_neg_integer(), ChunkLimit :: pos_integer()) ->

@@ -22,7 +22,7 @@ next_id(Name) ->
   case whereis(Counter) of
     undefined ->
       % The counter does not exist, spawn and register
-      Pid = spawn(fun() -> loop(0) end),
+      Pid = spawn(fun() -> loop(1) end),
       try
         case register(Counter, Pid) of
           false ->
