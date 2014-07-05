@@ -20,7 +20,7 @@ request_timeout_test() ->
   ConfSleep = 25,
 
   % Register a new service to the relay
-  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, {self(), ConfSleep}),
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, {self(), ConfSleep}),
   Conn = receive
     {ok, Client} -> Client
   end,
@@ -43,7 +43,7 @@ request_expiration_test() ->
   ConfSleep    = 25,
 
   % Register a new service to the relay
-  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, {self(), ConfSleep}),
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, {self(), ConfSleep}),
   Conn = receive
     {ok, Client} -> Client
   end,

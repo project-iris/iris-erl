@@ -28,7 +28,7 @@ broadcast_test() ->
 		spawn(fun() ->
 			try
 				% Connect to the local relay
-				{ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+				{ok, Conn} = iris_client:start(?CONFIG_RELAY),
 				iris_barrier:sync(Barrier),
 
 				% Broadcast to the whole service cluster
@@ -41,9 +41,9 @@ broadcast_test() ->
 				% Disconnect from the local relay
 				ok = iris_client:stop(Conn),
 				iris_barrier:exit(Barrier)
-			catch
-				Exception -> iris_barrier:exit(Exception), ok
-			end
+      catch
+        error:Exception -> iris_barrier:exit(Barrier, Exception)
+      end
 		end)
 	end, lists:seq(1, ConfClients)),
 
@@ -52,7 +52,7 @@ broadcast_test() ->
 		spawn(fun() ->
 			try
 				% Register a new service to the relay
-				{ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+				{ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
 				Conn = receive
 					{ok, Client} -> Client
 				end,
@@ -97,9 +97,9 @@ broadcast_test() ->
 				% Unregister the service
 				ok = iris_server:stop(Server),
 				iris_barrier:exit(Barrier)
-			catch
-				Exception -> iris_barrier:exit(Exception), ok
-			end
+      catch
+        error:Exception -> iris_barrier:exit(Barrier, Exception)
+      end
 		end)
 	end, lists:seq(1, ConfServers)),
 
@@ -113,7 +113,7 @@ broadcast_test() ->
 %% Tests the broadcast memory limitation.
 broadcast_memory_limit_test() ->
   % Register a new service to the relay
-  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self(), [{broadcast_memory, 1}]),
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self(), [{broadcast_memory, 1}]),
   Conn = receive
     {ok, Client} -> Client
   end,

@@ -20,7 +20,7 @@ request_fail_test() ->
   ConfRequests = 125,
 
   % Register a new service to the relay
-  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
   Conn = receive
     {ok, Client} -> Client
   end,

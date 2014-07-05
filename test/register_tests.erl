@@ -25,15 +25,15 @@ register_test() ->
 		spawn(fun() ->
 			try
 				% Register a new service to the relay
-				{ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, nil),
+				{ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, nil),
 				iris_barrier:sync(Barrier),
 
 				% Unregister the service
 				ok = iris_server:stop(Server),
 				iris_barrier:exit(Barrier)
-			catch
-				Exception -> iris_barrier:exit(Exception), ok
-			end
+      catch
+        error:Exception -> iris_barrier:exit(Barrier, Exception)
+      end
 		end)
 	end, lists:seq(1, ConfServices)),
 

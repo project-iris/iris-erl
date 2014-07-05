@@ -21,14 +21,14 @@ connect_test() ->
 		spawn(fun() ->
 			try
 				% Connect to the local relay
-				{ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+				{ok, Conn} = iris_client:start(?CONFIG_RELAY),
 				iris_barrier:sync(Barrier),
 
 				% Disconnect from the local relay
 				ok = iris_client:stop(Conn),
 				iris_barrier:exit(Barrier)
 			catch
-				Exception -> iris_barrier:exit(Exception), ok
+				error:Exception -> iris_barrier:exit(Barrier, Exception)
 			end
 		end)
 	end, lists:seq(1, ConfClients)),

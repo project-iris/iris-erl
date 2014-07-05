@@ -33,7 +33,7 @@ publish_test() ->
 		spawn(fun() ->
 			try
 				% Connect to the local relay
-				{ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+				{ok, Conn} = iris_client:start(?CONFIG_RELAY),
 				iris_barrier:sync(Barrier),
 
 				% Subscribe to the batch of topics
@@ -59,9 +59,9 @@ publish_test() ->
 				% Disconnect from the local relay
 				ok = iris_client:stop(Conn),
 				iris_barrier:exit(Barrier)
-			catch
-				Exception -> iris_barrier:exit(Exception), ok
-			end
+      catch
+        error:Exception -> iris_barrier:exit(Barrier, Exception)
+      end
 		end)
 	end, lists:seq(1, ConfClients)),
 
@@ -70,7 +70,7 @@ publish_test() ->
 		spawn(fun() ->
 			try
 				% Register a new service to the relay
-				{ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+				{ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
 				Conn = receive
 					{ok, Client} -> Client
 				end,
@@ -99,9 +99,9 @@ publish_test() ->
 				% Unregister the service
 				ok = iris_server:stop(Server),
 				iris_barrier:exit(Barrier)
-			catch
-				Exception -> iris_barrier:exit(Exception), ok
-			end
+      catch
+        error:Exception -> iris_barrier:exit(Barrier, Exception)
+      end
 		end)
 	end, lists:seq(1, ConfServers)),
 
@@ -149,7 +149,7 @@ verify_events(Clients, Servers, Topics, Events) ->
 %% Tests the subscription memory limitation.
 publish_memory_limit_test() ->
   % Connect to the relay
-	{ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+	{ok, Conn} = iris_client:start(?CONFIG_RELAY),
 
 	% Subscribe to a topic and wait for state propagation
   ok = iris_client:subscribe(Conn, ?CONFIG_TOPIC, pubsub_handler, {self(), ?CONFIG_TOPIC}, [{event_memory, 1}]),

@@ -27,7 +27,7 @@ request_test() ->
     spawn(fun() ->
       try
         % Connect to the local relay
-        {ok, Conn} = iris_client:start_link(?CONFIG_RELAY),
+        {ok, Conn} = iris_client:start(?CONFIG_RELAY),
         iris_barrier:sync(Barrier),
 
         % Request from the service cluster
@@ -42,7 +42,7 @@ request_test() ->
         ok = iris_client:stop(Conn),
         iris_barrier:exit(Barrier)
       catch
-        Exception -> iris_barrier:exit(Exception), ok
+        error:Exception -> iris_barrier:exit(Barrier, Exception)
       end
     end)
   end, lists:seq(1, ConfClients)),
@@ -52,7 +52,7 @@ request_test() ->
     spawn(fun() ->
       try
         % Register a new service to the relay
-        {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+        {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
         Conn = receive
           {ok, Client} -> Client
         end,
@@ -70,7 +70,7 @@ request_test() ->
         ok = iris_server:stop(Server),
         iris_barrier:exit(Barrier)
       catch
-        Exception -> iris_barrier:exit(Exception), ok
+        error:Exception -> iris_barrier:exit(Barrier, Exception)
       end
     end)
   end, lists:seq(1, ConfServers)),
@@ -84,7 +84,7 @@ request_test() ->
 %% Tests the request memory limitation.
 request_memory_limit_test() ->
   % Register a new service to the relay
-  {ok, Server} = iris_server:start_link(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self(), [{request_memory, 1}]),
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self(), [{request_memory, 1}]),
   Conn = receive
     {ok, Client} -> Client
   end,
