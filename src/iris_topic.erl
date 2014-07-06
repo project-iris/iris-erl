@@ -106,7 +106,7 @@ handle_call(limiter, _From, State = #state{limiter = Limiter}) ->
 %% Unsubscribes from the topic.
 handle_call(stop, _From, State) ->
   iris_logger:info(State#state.logger, "unsubscribing from topic"),
-	{stop, normal, shutdown, State}.
+	{stop, normal, ok, State}.
 
 
 %% @private

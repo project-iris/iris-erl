@@ -156,7 +156,7 @@ publish(Client, Topic, Event) ->
 	ok | {error, Reason :: atom()}.
 
 unsubscribe(Client, Topic) ->
-	iris_client:unsubscribe(Client, Topic).
+	iris_conn:unsubscribe(Client, Topic).
 
 
 %% @doc Opens a direct tunnel to an instance of app, allowing pairwise-exclusive

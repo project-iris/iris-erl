@@ -13,7 +13,7 @@
 	tunnel/3, tunnel_send/4, tunnel_ack/2, tunnel_close/2]).
 
 -export([handle_reply/3, handle_tunnel_init/3, handle_tunnel_result/3,
-  handle_tunnel_close/2]).
+	handle_tunnel_close/2]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
@@ -42,20 +42,20 @@ connect_link(Port, Logger) ->
 
 %% Starts the gen_server responsible for a service connection.
 -spec register(Port :: pos_integer(), Cluster :: string(), Handler :: pid(),
-  Limits :: {pos_integer(), pos_integer()}, Logger :: iris_logger:logger()) ->
-  {ok, Connection :: pid()} | {error, Reason :: atom()}.
+	Limits :: {pos_integer(), pos_integer()}, Logger :: iris_logger:logger()) ->
+	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
 register(Port, Cluster, Handler, Limits, Logger) ->
-  gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler, Limits, Logger}, []).
+	gen_server:start(?MODULE, {Port, lists:flatten(Cluster), Handler, Limits, Logger}, []).
 
 
 %% Starts the gen_server responsible for a service connection.
 -spec register_link(Port :: pos_integer(), Cluster :: string(), Handler :: pid(),
-  Limits :: {pos_integer(), pos_integer()}, Logger :: iris_logger:logger()) ->
-  {ok, Connection :: pid()} | {error, Reason :: atom()}.
+	Limits :: {pos_integer(), pos_integer()}, Logger :: iris_logger:logger()) ->
+	{ok, Connection :: pid()} | {error, Reason :: atom()}.
 
 register_link(Port, Cluster, Handler, Limits, Logger) ->
-  gen_server:start_link(?MODULE, {Port, lists:flatten(Cluster), Handler, Limits, Logger}, []).
+	gen_server:start_link(?MODULE, {Port, lists:flatten(Cluster), Handler, Limits, Logger}, []).
 
 
 %% Notifies the relay server of a graceful close request.
@@ -151,10 +151,10 @@ tunnel_close(Connection, TunId) ->
 %% @private
 %% Schedules an application broadcast for the service handler to process.
 -spec handle_reply(Connection :: pid(), Id :: pos_integer(),
-  {ok, Reply :: binary()} | {error, Reason :: term()}) -> ok.
+	{ok, Reply :: binary()} | {error, Reason :: term()}) -> ok.
 
 handle_reply(Connection, Id, Response) ->
-  gen_server:cast(Connection, {reply, Id, Response}).
+	gen_server:cast(Connection, {reply, Id, Response}).
 
 
 -spec handle_tunnel_init(Connection :: pid(), Id :: non_neg_integer(),
@@ -174,7 +174,7 @@ handle_tunnel_result(Connection, Id, Result) ->
 -spec handle_tunnel_close(Connection :: pid(), Id :: non_neg_integer()) -> ok.
 
 handle_tunnel_close(Connection, Id) ->
-  gen_server:cast(Connection, {handle_tunnel_close, Id}).
+	gen_server:cast(Connection, {handle_tunnel_close, Id}).
 
 
 %% =============================================================================
@@ -183,12 +183,13 @@ handle_tunnel_close(Connection, Id) ->
 
 -record(state, {
 	sock,     %% Network connection to the iris node
+	procpid,  %% Network data reader process
 	handler,  %% Handler for connection events
 
 	reqIdx,   %% Index to assign the next request
 	reqPend,  %% Active requests waiting for a reply
 
-  subIdx,   %% Index to assign the next subscription (logging purposes)
+	subIdx,   %% Index to assign the next subscription (logging purposes)
 	subLive,  %% Active topic subscriptions
 
 	tunIdx,   %% Index to assign the next tunnel
@@ -220,25 +221,26 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}, Logger}) ->
 
 							% Spawn the mailbox limiter threads and message receiver
 							process_flag(trap_exit, true),
-              Broadcaster = iris_mailbox:start_link(Handler, BroadcastMemory, Logger),
-              Requester   = iris_mailbox:start_link(Handler, RequestMemory, Logger),
-              _Processor  = iris_proto:start_link(Sock, Broadcaster, Requester, Topics, Tunnels),
+							Broadcaster = iris_mailbox:start_link(Handler, BroadcastMemory, Logger),
+							Requester   = iris_mailbox:start_link(Handler, RequestMemory, Logger),
+							Processor   = iris_proto:start_link(Sock, Broadcaster, Requester, Topics, Tunnels),
 
-              % Assemble the internal state and return
+							% Assemble the internal state and return
 							{ok, #state{
 								sock    = Sock,
+								procpid = Processor,
 								handler = Handler,
 								reqIdx  = 0,
 								reqPend = ets:new(requests, [set, private]),
-                subIdx  = 1,
+								subIdx  = 1,
 								subLive = Topics,
 								tunIdx  = 0,
 								tunPend = ets:new(tunnels_pending, [set, private]),
 								tunLive = Tunnels,
 								closer  = nil,
-                logger  = Logger
+								logger  = Logger
 							}};
-            {error, Reason} -> {stop, Reason}
+						{error, Reason} -> {stop, Reason}
 					end;
 				{error, Reason} -> {stop, Reason}
 			end;
@@ -247,13 +249,13 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}, Logger}) ->
 
 %% Sends a graceful close request to the relay. The reply will arrive async.
 handle_call(close, From, State = #state{sock = Sock}) ->
-  iris_logger:info(State#state.logger, "detaching from relay"),
-  ok = iris_proto:send_close(Sock),
-  {noreply, State#state{closer = From}};
+	iris_logger:info(State#state.logger, "detaching from relay"),
+	ok = iris_proto:send_close(Sock),
+	{noreply, State#state{closer = From}};
 
 %% Relays a message to the Iris node for broadcasting.
 handle_call({broadcast, Cluster, Message}, _From, State = #state{sock = Sock}) ->
-  iris_logger:debug(State#state.logger, "sending new broadcast", [{cluster, Cluster}, {data, Message}]),
+	iris_logger:debug(State#state.logger, "sending new broadcast", [{cluster, Cluster}, {data, Message}]),
 	{reply, iris_proto:send_broadcast(Sock, Cluster, Message), State};
 
 %% Relays a request to the Iris node, waiting async for the reply.
@@ -264,34 +266,34 @@ handle_call({request, Cluster, Request, Timeout}, From, State = #state{sock = So
 	NewState = State#state{reqIdx = ReqId+1},
 
 	% Send the request to the relay and finish with a pending reply
-  iris_logger:debug(State#state.logger, "sending new request",
-    [{local_request, ReqId}, {cluster, Cluster}, {data, Request}, {timeout, Timeout}]
-  ),
+	iris_logger:debug(State#state.logger, "sending new request",
+		[{local_request, ReqId}, {cluster, Cluster}, {data, Request}, {timeout, Timeout}]
+	),
 	ok = iris_proto:send_request(Sock, ReqId, Cluster, Request, Timeout),
 	{noreply, NewState};
 
 %% Relays a request reply to the Iris node.
 handle_call({reply, ReqId, Response}, _From, State = #state{sock = Sock}) ->
-  iris_logger:debug(State#state.logger, "replying to handled request",
-    [{temore_request, ReqId}, {response, Response}]
-  ),
+	iris_logger:debug(State#state.logger, "replying to handled request",
+		[{temore_request, ReqId}, {response, Response}]
+	),
 	{reply, iris_proto:send_reply(Sock, ReqId, Response), State};
 
 %% Relays a subscription request to the Iris node (taking care of duplicates).
 handle_call({subscribe, Topic, Module, Args, Options}, _From, State = #state{sock = Sock, subIdx = Idx}) ->
-  % Make sure the subscription limits have valid values
-  MemoryLimit = case proplists:lookup(event_memory, Options) of
-    none                  -> iris_limits:default_topic_memory();
-    {event_memory, Limit} -> Limit
-  end,
+	% Make sure the subscription limits have valid values
+	MemoryLimit = case proplists:lookup(event_memory, Options) of
+		none                  -> iris_limits:default_topic_memory();
+		{event_memory, Limit} -> Limit
+	end,
 
-  % Create a topic logger with the name injected
-  Logger = iris_logger:new(State#state.logger, [{topic, Idx}]),
-  iris_logger:info(Logger, "subscribing to new topic", [{name, Topic},
-    {limits, lists:flatten(io_lib:format("1T|~pB", [MemoryLimit]))}
-  ]),
+	% Create a topic logger with the name injected
+	Logger = iris_logger:new(State#state.logger, [{topic, Idx}]),
+	iris_logger:info(Logger, "subscribing to new topic", [{name, Topic},
+		{limits, lists:flatten(io_lib:format("1T|~pB", [MemoryLimit]))}
+	]),
 
-  % Execute the subscription procedure
+	% Execute the subscription procedure
 	ok        = iris_proto:send_subscribe(Sock, Topic),
 	{ok, Sub} = iris_topic:start_link(self(), Module, Args, MemoryLimit, Logger),
 	Limiter   = iris_topic:limiter(Sub),
@@ -350,7 +352,7 @@ handle_cast({reply, Id, Response}, State) ->
 %% tunnel with the given chunking limit and replies to the relay with the final
 %% permanent tunnel id.
 handle_cast({handle_tunnel_init, BuildId, ChunkLimit}, State = #state{sock = Sock}) ->
-  io:format(user, "tunnel init~n", []),
+	io:format(user, "tunnel init~n", []),
 
 	% Create the local tunnel endpoint
 	TunId = State#state.tunIdx,
@@ -359,7 +361,7 @@ handle_cast({handle_tunnel_init, BuildId, ChunkLimit}, State = #state{sock = Soc
 
 	% Acknowledge the tunnel creation to the relay
 	ok = iris_proto:send_tunnel_confirm(Sock, BuildId, TunId),
-  ok = iris_proto:send_tunnel_allowance(Sock, TunId, iris_limits:default_tunnel_buffer()),
+	ok = iris_proto:send_tunnel_allowance(Sock, TunId, iris_limits:default_tunnel_buffer()),
 
 	% Notify the handler of the new tunnel
 	ok = iris_server:handle_tunnel(State#state.handler, Tunnel),
@@ -378,7 +380,7 @@ handle_cast({handle_tunnel_result, TunId, Result}, State) ->
 				{ok, Tunnel} ->
 					% Save the live tunnel
 					true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
-          ok = iris_proto:send_tunnel_allowance(State#state.sock, TunId, iris_limits:default_tunnel_buffer()),
+					ok = iris_proto:send_tunnel_allowance(State#state.sock, TunId, iris_limits:default_tunnel_buffer()),
 					{ok, Tunnel};
 				Error -> Error
 			end;
@@ -389,12 +391,12 @@ handle_cast({handle_tunnel_result, TunId, Result}, State) ->
 
 %% Closes a tunnel connection, removing it from the local state.
 handle_cast({handle_tunnel_close, TunId}, State) ->
-  true = ets:delete(State#state.tunLive, TunId),
-  {noreply, State}.
+	true = ets:delete(State#state.tunLive, TunId),
+	{noreply, State}.
 
 %% Handles the termination of the receiver thread: either returns a clean exit
 %% or notifies the handler of a drop.
-handle_info({'EXIT', _Pid, Reason}, State) ->
+handle_info({'EXIT', ProcPid, Reason}, State) when ProcPid =:= State#state.procpid ->
 	% Notify all pending requests of the failure
 	lists:foreach(fun({_ReqId, Pid}) ->
 		gen_server:reply(Pid, {error, terminating})
@@ -413,7 +415,12 @@ handle_info({'EXIT', _Pid, Reason}, State) ->
 		Pid ->
 			gen_server:reply(Pid, ok),
 			{stop, normal, State}
-	end.
+	end;
+
+%% Handles the normal termination of any child, beside the protocol processor.
+handle_info({'EXIT', _Pid, normal}, State) ->
+	{noreply, State}.
+
 
 %% Final cleanup, close up the relay link.
 terminate(_Reason, State) ->

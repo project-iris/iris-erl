@@ -78,7 +78,7 @@ limit(Owner, Limit, Used, AutoId, Logger) ->
           limit(Owner, Limit, Used + Size, AutoId + 1, Logger);
         false ->
           % Not enough memory in the message queue
-          iris_logger:error(Logger, "queue exceeded memory allowance",
+          iris_logger:error(Logger, "exceeded memory allowance",
             [Context, {limit, Limit}, {used, Used}, {size, Size}]
           ),
           limit(Owner, Limit, Used, AutoId + 1, Logger)
