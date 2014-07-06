@@ -112,6 +112,7 @@ handle_call(stop, _From, State) ->
 %% @private
 %% Delivers a topic event to the callback and processes the result.
 handle_info({LogCtx, {handle_event, Event}, Limiter}, State = #state{hand_mod = Mod}) ->
+  iris_logger:debug(State#state.logger, "handling scheduled event", [LogCtx]),
   iris_mailbox:replenish(Limiter, byte_size(Event)),
 	case Mod:handle_event(Event, State#state.hand_state) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};

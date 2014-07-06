@@ -302,6 +302,7 @@ handle_call({subscribe, Topic, Module, Args, Options}, _From, State = #state{soc
 
 %% Relays an event to the Iris node for topic publishing.
 handle_call({publish, Topic, Event}, _From, State = #state{sock = Sock}) ->
+	iris_logger:debug(State#state.logger, "publishing new event", [{topic, Topic}, {data, Event}]),
 	{reply, iris_proto:send_publish(Sock, Topic, Event), State};
 
 %% Relays a subscription removal request to the Iris node (ensuring validity).
