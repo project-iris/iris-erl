@@ -274,9 +274,15 @@ handle_call({request, Cluster, Request, Timeout}, From, State = #state{sock = So
 
 %% Relays a request reply to the Iris node.
 handle_call({reply, ReqId, Response}, _From, State = #state{sock = Sock}) ->
+  % Extract the response details and log it
+	{Reply, Error} = case	Response of
+		{ok, Rep}      -> {Rep, ""};
+		{error, Fault} -> {<<>>, Fault}
+	end,
 	iris_logger:debug(State#state.logger, "replying to handled request",
-		[{temore_request, ReqId}, {response, Response}]
+		[{remote_request, ReqId}, {reply, Reply}, {error, Error}]
 	),
+	% Send it over the network
 	{reply, iris_proto:send_reply(Sock, ReqId, Response), State};
 
 %% Relays a subscription request to the Iris node (taking care of duplicates).
@@ -344,6 +350,15 @@ handle_cast({reply, Id, Response}, State) ->
 	% Fetch the result channel and remove from state
 	{Id, Pending} = hd(ets:lookup(State#state.reqPend, Id)),
 	ets:delete(State#state.reqPend, Id),
+
+	% Extract the response details and log it
+	{Reply, Error} = case	Response of
+		{ok, Rep}      -> {Rep, ""};
+		{error, Fault} -> {<<>>, Fault}
+	end,
+	iris_logger:debug(State#state.logger, "request completed",
+		[{local_request, Id}, {data, Reply}, {error, Error}]
+	),
 
 	% Reply to the pending process and return
 	gen_server:reply(Pending, Response),
