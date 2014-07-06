@@ -188,6 +188,7 @@ handle_tunnel_close(Connection, Id) ->
 	reqIdx,   %% Index to assign the next request
 	reqPend,  %% Active requests waiting for a reply
 
+  subIdx,   %% Index to assign the next subscription (logging purposes)
 	subLive,  %% Active topic subscriptions
 
 	tunIdx,   %% Index to assign the next tunnel
@@ -229,6 +230,7 @@ init({Port, Cluster, Handler, {BroadcastMemory, RequestMemory}, Logger}) ->
 								handler = Handler,
 								reqIdx  = 0,
 								reqPend = ets:new(requests, [set, private]),
+                subIdx  = 1,
 								subLive = Topics,
 								tunIdx  = 0,
 								tunPend = ets:new(tunnels_pending, [set, private]),
@@ -276,12 +278,25 @@ handle_call({reply, ReqId, Response}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:send_reply(Sock, ReqId, Response), State};
 
 %% Relays a subscription request to the Iris node (taking care of duplicates).
-handle_call({subscribe, Topic, Module, Args, Options}, _From, State = #state{sock = Sock}) ->
+handle_call({subscribe, Topic, Module, Args, Options}, _From, State = #state{sock = Sock, subIdx = Idx}) ->
+  % Make sure the subscription limits have valid values
+  MemoryLimit = case proplists:lookup(event_memory, Options) of
+    none                  -> iris_limits:default_topic_memory();
+    {event_memory, Limit} -> Limit
+  end,
+
+  % Create a topic logger with the name injected
+  Logger = iris_logger:new(State#state.logger, [{topic, Idx}]),
+  iris_logger:info(Logger, "subscribing to new topic", [{name, Topic},
+    {limits, lists:flatten(io_lib:format("1T|~pB", [MemoryLimit]))}
+  ]),
+
+  % Execute the subscription procedure
 	ok        = iris_proto:send_subscribe(Sock, Topic),
-	{ok, Sub} = iris_topic:start_link(self(), Module, Args, Options),
+	{ok, Sub} = iris_topic:start_link(self(), Module, Args, MemoryLimit, Logger),
 	Limiter   = iris_topic:limiter(Sub),
 	true      = ets:insert_new(State#state.subLive, {Topic, Sub, Limiter}),
-	{reply, ok, State};
+	{reply, ok, State#state{subIdx = Idx + 1}};
 
 %% Relays an event to the Iris node for topic publishing.
 handle_call({publish, Topic, Event}, _From, State = #state{sock = Sock}) ->

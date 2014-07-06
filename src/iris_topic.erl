@@ -6,14 +6,12 @@
 %% For details please see http://iris.karalabe.com/downloads#License
 
 -module(iris_topic).
--export([start_link/4, stop/1, limiter/1]).
+-export([start_link/5, stop/1, limiter/1]).
 -export([handle_event/2]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
 	code_change/3]).
-
--define(DEFAULT_EVENT_MEMORY_LIMIT, 64 * 1024 * 1024).
 
 
 %% =============================================================================
@@ -34,11 +32,11 @@
 %% External API functions
 %% =============================================================================
 
--spec start_link(Conn :: pid(), Module :: atom(), Args :: term(),
-	Options :: [{atom(), term()}]) -> {ok, Server :: pid()} | {error, Reason :: term()}.
+-spec start_link(Conn :: pid(), Module :: atom(), Args :: term(),	Limits :: pos_integer(),
+  Logger :: iris_logger:logger()) -> {ok, Server :: pid()} | {error, Reason :: term()}.
 
-start_link(Conn, Module, Args, Options) ->
-	gen_server:start_link(?MODULE, {Conn, Module, Args, Options}, []).
+start_link(Conn, Module, Args, Limits, Logger) ->
+	gen_server:start_link(?MODULE, {Conn, Module, Args, Limits, Logger}, []).
 
 
 -spec stop(Topic :: pid()) ->
@@ -71,7 +69,8 @@ handle_event(Limiter, Event) ->
 -record(state, {
 	limiter,    %% Bounded mailbox limiter
   hand_mod,   %% Handler callback module
-  hand_state  %% Handler internal state
+  hand_state, %% Handler internal state
+  logger      %% Logger with connection and topic id injected
 }).
 
 
@@ -81,16 +80,10 @@ handle_event(Limiter, Event) ->
 
 %% @private
 %% Initializes the callback handler and subscribes to the requested topic.
-init({Conn, Module, Args, Options}) ->
-  % Load the service limits (or defaults)
-  EventMemory = case proplists:lookup(event_memory, Options) of
-    none                  -> ?DEFAULT_EVENT_MEMORY_LIMIT;
-    {event_memory, Limit} -> Limit
-  end,
-
+init({Conn, Module, Args, Limits, Logger}) ->
 	% Spawn the mailbox limiter threads
 	process_flag(trap_exit, true),
-  Limiter = iris_mailbox:start_link(self(), EventMemory, iris_logger:new()),
+  Limiter = iris_mailbox:start_link(self(), Limits, Logger),
 
   % Initialize the callback handler
 	case Module:init(Conn, Args) of
@@ -98,7 +91,8 @@ init({Conn, Module, Args, Options}) ->
 			{ok, #state{
 				limiter    = Limiter,
 				hand_mod   = Module,
-				hand_state = State
+				hand_state = State,
+        logger     = Logger
 			}};
 		{error, Reason} -> {stop, Reason}
 	end.
@@ -111,6 +105,7 @@ handle_call(limiter, _From, State = #state{limiter = Limiter}) ->
 
 %% Unsubscribes from the topic.
 handle_call(stop, _From, State) ->
+  iris_logger:info(State#state.logger, "unsubscribing from topic"),
 	{stop, normal, shutdown, State}.
 
 

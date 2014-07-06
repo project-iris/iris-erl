@@ -394,22 +394,6 @@ timestamp() ->
   Mega*1000*1000*1000*1000 + Secs * 1000 * 1000 + Micro.
 
 
-%% Loads the service limits, or defaults if not specified.
--spec finalize_service_limits(Options :: [{atom(), term()}]) ->
-  {BroadcastMemory :: pos_integer(), RequestMemory :: pos_integer()}.
-
-finalize_service_limits(Options) ->
-  BroadcastMemory = case proplists:lookup(broadcast_memory, Options) of
-    none                       -> iris_limits:default_broadcast_memory();
-    {broadcast_memory, BLimit} -> BLimit
-  end,
-  RequestMemory = case proplists:lookup(request_memory, Options) of
-    none                     -> iris_limits:default_request_memory();
-    {request_memory, RLimit} -> RLimit
-  end,
-  {BroadcastMemory, RequestMemory}.
-
-
 %% =============================================================================
 %% Generic server internal state
 %% =============================================================================
@@ -430,7 +414,15 @@ finalize_service_limits(Options) ->
 %% Initializes the callback handler and connects to the local Iris relay node.
 init({Port, Cluster, Module, Args, Options}) ->
   %% Make sure the service limits have valid values
-  Limits = finalize_service_limits(Options),
+  BroadcastMemory = case proplists:lookup(broadcast_memory, Options) of
+    none                       -> iris_limits:default_broadcast_memory();
+    {broadcast_memory, BLimit} -> BLimit
+  end,
+  RequestMemory = case proplists:lookup(request_memory, Options) of
+    none                     -> iris_limits:default_request_memory();
+    {request_memory, RLimit} -> RLimit
+  end,
+  Limits = {BroadcastMemory, RequestMemory},
 
   Logger = iris_logger:new([{server, iris_counter:next_id(server)}]),
   iris_logger:info(Logger, "registering new service", [
@@ -445,6 +437,7 @@ init({Port, Cluster, Module, Args, Options}) ->
 		  % Initialize the callback handler
 			case Module:init(Conn, Args) of
 				{ok, State} ->
+          iris_logger:info(Logger, "service registration completed"),
 					{ok, #state{
 						conn       = Conn,
 						hand_mod   = Module,

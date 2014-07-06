@@ -56,6 +56,12 @@ publish_test() ->
 				verify_events(ConfClients, ConfServers, Topics, ConfEvents),
 				iris_barrier:sync(Barrier),
 
+        % Unsubscribe from the topics
+        lists:foreach(fun(Topic) ->
+          ok = iris_client:unsubscribe(Conn, Topic)
+        end, Topics),
+        iris_barrier:sync(Barrier),
+
 				% Disconnect from the local relay
 				ok = iris_client:stop(Conn),
 				iris_barrier:exit(Barrier)
@@ -96,6 +102,12 @@ publish_test() ->
 				verify_events(ConfClients, ConfServers, Topics, ConfEvents),
 				iris_barrier:sync(Barrier),
 
+        % Unsubscribe from the topics
+        lists:foreach(fun(Topic) ->
+          ok = iris_client:unsubscribe(Conn, Topic)
+        end, Topics),
+        iris_barrier:sync(Barrier),
+
 				% Unregister the service
 				ok = iris_server:stop(Server),
 				iris_barrier:exit(Barrier)
@@ -109,6 +121,7 @@ publish_test() ->
 	ok = iris_barrier:wait(Barrier),
 	ok = iris_barrier:wait(Barrier),
 	ok = iris_barrier:wait(Barrier),
+  ok = iris_barrier:wait(Barrier),
 	ok = iris_barrier:wait(Barrier),
 	ok = iris_barrier:wait(Barrier).
 
@@ -153,6 +166,7 @@ publish_memory_limit_test() ->
 
 	% Subscribe to a topic and wait for state propagation
   ok = iris_client:subscribe(Conn, ?CONFIG_TOPIC, pubsub_handler, {self(), ?CONFIG_TOPIC}, [{event_memory, 1}]),
+  timer:sleep(100),
 
   % Check that a 1 byte publish passes
   ok = iris_client:publish(Conn, ?CONFIG_TOPIC, <<0:8>>),
@@ -177,6 +191,9 @@ publish_memory_limit_test() ->
   after
     1 -> timeout
   end,
+
+  % Unsubscribe from the topic
+  ok = iris_client:unsubscribe(Conn, ?CONFIG_TOPIC),
 
 	% Disconnect from the local relay
 	ok = iris_client:stop(Conn).
