@@ -346,10 +346,10 @@ stop(Server) ->
 %%      Reason = atom()
 %% @end
 -spec reply(Client :: term(), Reply :: binary()) ->
-  ok | {error, Reason :: atom()}.
+	ok | {error, Reason :: atom()}.
 
 reply(Client, Reply) ->
-  iris_conn:reply(Client, Reply).
+	iris_conn:reply(Client, Reply).
 
 
 %% =============================================================================
@@ -361,17 +361,17 @@ reply(Client, Reply) ->
 -spec handle_broadcast(Limiter :: pid(), Message :: binary()) -> ok.
 
 handle_broadcast(Limiter, Message) ->
-  ok = iris_mailbox:schedule(Limiter, {handle_broadcast, Message}).
+	ok = iris_mailbox:schedule(Limiter, {handle_broadcast, Message}).
 
 
 %% @private
 %% Schedules an application request for the service handler to process.
 -spec handle_request(Limiter :: pid(), Id :: non_neg_integer(), Request :: binary(),
-  Timeout :: pos_integer()) -> ok.
+	Timeout :: pos_integer()) -> ok.
 
 handle_request(Limiter, Id, Request, Timeout) ->
-  Expiry = timestamp() + Timeout * 1000,
-  ok = iris_mailbox:schedule(Limiter, {handle_request, Id, Request, Timeout, Expiry}).
+	Expiry = timestamp() + Timeout * 1000,
+	ok = iris_mailbox:schedule(Limiter, {handle_request, Id, Request, Timeout, Expiry}).
 
 
 %% @private
@@ -390,8 +390,8 @@ handle_tunnel(Server, Tunnel) ->
 -spec timestamp() -> pos_integer().
 
 timestamp() ->
-  {Mega, Secs, Micro} = erlang:now(),
-  Mega*1000*1000*1000*1000 + Secs * 1000 * 1000 + Micro.
+	{Mega, Secs, Micro} = erlang:now(),
+	Mega*1000*1000*1000*1000 + Secs * 1000 * 1000 + Micro.
 
 
 %% =============================================================================
@@ -400,9 +400,9 @@ timestamp() ->
 
 -record(state, {
 	conn,       %% High level Iris connection
-  hand_mod,   %% Handler callback module
-  hand_state, %% Handler internal state
-  logger      %% Logger with connection id injected
+	hand_mod,   %% Handler callback module
+	hand_state, %% Handler internal state
+	logger      %% Logger with connection id injected
 }).
 
 
@@ -413,40 +413,44 @@ timestamp() ->
 %% @private
 %% Initializes the callback handler and connects to the local Iris relay node.
 init({Port, Cluster, Module, Args, Options}) ->
-  %% Make sure the service limits have valid values
-  BroadcastMemory = case proplists:lookup(broadcast_memory, Options) of
-    none                       -> iris_limits:default_broadcast_memory();
-    {broadcast_memory, BLimit} -> BLimit
-  end,
-  RequestMemory = case proplists:lookup(request_memory, Options) of
-    none                     -> iris_limits:default_request_memory();
-    {request_memory, RLimit} -> RLimit
-  end,
-  Limits = {BroadcastMemory, RequestMemory},
+	%% Make sure the service limits have valid values
+	BroadcastMemory = case proplists:lookup(broadcast_memory, Options) of
+		none                       -> iris_limits:default_broadcast_memory();
+		{broadcast_memory, BLimit} -> BLimit
+	end,
+	RequestMemory = case proplists:lookup(request_memory, Options) of
+		none                     -> iris_limits:default_request_memory();
+		{request_memory, RLimit} -> RLimit
+	end,
+	Limits = {BroadcastMemory, RequestMemory},
 
-  Logger = iris_logger:new([{server, iris_counter:next_id(server)}]),
-  iris_logger:info(Logger, "registering new service", [
-    {relay_port, Port}, {cluster, Cluster},
-    {broadcast_limits, lists:flatten(io_lib:format("1T|~pB", [element(1, Limits)]))},
-    {request_limits, lists:flatten(io_lib:format("1T|~pB", [element(2, Limits)]))}
-  ]),
+	Logger = iris_logger:new([{server, iris_counter:next_id(server)}]),
+	iris_logger:info(Logger, "registering new service", [
+		{relay_port, Port}, {cluster, Cluster},
+		{broadcast_limits, lists:flatten(io_lib:format("1T|~pB", [element(1, Limits)]))},
+		{request_limits, lists:flatten(io_lib:format("1T|~pB", [element(2, Limits)]))}
+	]),
 
 	% Initialize the Iris connection
 	case iris_conn:register(Port, lists:flatten(Cluster), self(), Limits, Logger) of
 		{ok, Conn} ->
-		  % Initialize the callback handler
+			% Initialize the callback handler
 			case Module:init(Conn, Args) of
 				{ok, State} ->
-          iris_logger:info(Logger, "service registration completed"),
+					iris_logger:info(Logger, "service registration completed"),
 					{ok, #state{
 						conn       = Conn,
 						hand_mod   = Module,
 						hand_state = State,
-            logger     = Logger
+						logger     = Logger
 					}};
-				{error, Reason} -> {stop, Reason}
+				{error, Reason} ->
+					iris_logger:info(Logger, "user failed to initialize service", [{reason, Reason}]),
+					{stop, Reason}
 			end;
-		{error, Reason} -> {stop, Reason}
+		{error, Reason} ->
+			iris_logger:info(Logger, "failed to register new service", [{reason, Reason}]),
+			{stop, Reason}
 	end.
 
 %% @private
@@ -457,8 +461,8 @@ handle_call(stop, _From, State = #state{conn = Conn}) ->
 %% @private
 %% Delivers a broadcast message to the callback and processes the result.
 handle_info({LogCtx, {handle_broadcast, Message}, Limiter}, State = #state{hand_mod = Mod}) ->
-  iris_logger:debug(State#state.logger, "handling scheduled broadcast", [LogCtx]),
-  iris_mailbox:replenish(Limiter, byte_size(Message)),
+	iris_logger:debug(State#state.logger, "handling scheduled broadcast", [LogCtx]),
+	iris_mailbox:replenish(Limiter, byte_size(Message)),
 	case Mod:handle_broadcast(Message, State#state.hand_state) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
@@ -466,30 +470,30 @@ handle_info({LogCtx, {handle_broadcast, Message}, Limiter}, State = #state{hand_
 
 %% Delivers a request to the callback and processes the result.
 handle_info({LogCtx, {handle_request, Id, Request, Timeout, Expiry}, Limiter}, State = #state{conn = Conn, hand_mod = Mod}) ->
-  iris_mailbox:replenish(Limiter, byte_size(Request)),
+	iris_mailbox:replenish(Limiter, byte_size(Request)),
 
-  Now = timestamp(),
-  case Expiry < Now of
-    true  ->
-      iris_logger:error(State#state.logger, "dumping expired scheduled request",
-        [LogCtx, {scheduled, Timeout + (Now - Expiry) / 1000}, {timeout, Timeout}, {expired, (Now - Expiry) / 1000}]
-      ),
-      {noreply, State};
-    false ->
-      iris_logger:debug(State#state.logger, "handling scheduled request", [LogCtx]),
-      From = {Conn, Id},
-    	case Mod:handle_request(Request, From, State#state.hand_state) of
-    		{reply, Response, NewState} ->
-    			ok = iris_conn:reply(From, Response),
-    			{noreply, State#state{hand_state = NewState}};
-    		{noreply, NewState} ->
-    			{noreply, State#state{hand_state = NewState}};
-    		{stop, Reason, Reply, NewState} ->
-    			ok = iris_conn:reply(From, Reply),
-    			{stop, Reason, State#state{hand_state = NewState}};
-    		{stop, Reason, NewState} ->
-    			{stop, Reason, State#state{hand_state = NewState}}
-      end
+	Now = timestamp(),
+	case Expiry < Now of
+		true  ->
+			iris_logger:error(State#state.logger, "dumping expired scheduled request",
+				[LogCtx, {scheduled, Timeout + (Now - Expiry) / 1000}, {timeout, Timeout}, {expired, (Now - Expiry) / 1000}]
+			),
+			{noreply, State};
+		false ->
+			iris_logger:debug(State#state.logger, "handling scheduled request", [LogCtx]),
+			From = {Conn, Id},
+			case Mod:handle_request(Request, From, State#state.hand_state) of
+				{reply, Response, NewState} ->
+					ok = iris_conn:reply(From, Response),
+					{noreply, State#state{hand_state = NewState}};
+				{noreply, NewState} ->
+					{noreply, State#state{hand_state = NewState}};
+				{stop, Reason, Reply, NewState} ->
+					ok = iris_conn:reply(From, Reply),
+					{stop, Reason, State#state{hand_state = NewState}};
+				{stop, Reason, NewState} ->
+					{stop, Reason, State#state{hand_state = NewState}}
+			end
 	end;
 
 %% Notifies the callback of the connection drop and processes the result.
