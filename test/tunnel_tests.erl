@@ -10,7 +10,7 @@
 -include("configs.hrl").
 
 -behaviour(iris_server).
--export([init/2, handle_broadcast/2, handle_request/3, handle_tunnel/3,
+-export([init/2, handle_broadcast/2, handle_request/3, handle_tunnel/2,
 	handle_drop/2, terminate/2]).
 
 
@@ -19,7 +19,7 @@
 %% =============================================================================
 
 %% Tests multiple concurrent client and service tunnels.
-tunnel_test() ->
+tunnel_tes() ->
   % Test specific configurations
   ConfClients   = 7,
   ConfServers   = 7,
@@ -114,7 +114,7 @@ init(Conn, Parent) ->
   {ok, nil}.
 
 %% Spawns a new process that echoes back all tunnel data.
-handle_tunnel(Tunnel, State, _Link) ->
+handle_tunnel(Tunnel, State) ->
 	spawn(fun() -> echoer(Tunnel) end),
 	{noreply, State}.
 

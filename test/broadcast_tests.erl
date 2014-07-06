@@ -10,7 +10,7 @@
 -include("configs.hrl").
 
 -behaviour(iris_server).
--export([init/2, handle_broadcast/2, handle_request/3,	handle_tunnel/3,
+-export([init/2, handle_broadcast/2, handle_request/3,	handle_tunnel/2,
 	handle_drop/2, terminate/2]).
 
 
@@ -171,7 +171,7 @@ terminate(_Reason, _State) -> ok.
 handle_request(_Request, _From, State) ->
 	{stop, unimplemented, State}.
 
-handle_tunnel(_Tunnel, State, _Link) ->
+handle_tunnel(_Tunnel, State) ->
 	{stop, unimplemented, State}.
 
 handle_drop(_Reason, State) ->

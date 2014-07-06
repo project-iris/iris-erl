@@ -240,7 +240,7 @@
 	{reply, {ok, Reply :: binary()} | {error, Reason :: term()}, NewState :: term()} | {noreply, NewState :: term()} |
 	{stop, Reply :: binary(), Reason :: term(), NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
--callback handle_tunnel(Tunnel :: iris:tunnel(), State :: term(), Conn :: iris:connection()) ->
+-callback handle_tunnel(Tunnel :: iris:tunnel(), State :: term()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
 -callback handle_drop(Reason :: term(), State :: term()) ->
@@ -505,7 +505,7 @@ handle_info({drop, Reason}, State = #state{conn = Conn, hand_mod = Mod}) ->
 
 %% Delivers an inbound tunnel to the callback and processes the result.
 handle_cast({handle_tunnel, Tunnel}, State = #state{conn = Conn, hand_mod = Mod}) ->
-	case Mod:handle_tunnel(Tunnel, State#state.hand_state, Conn) of
+	case Mod:handle_tunnel(Tunnel, State#state.hand_state) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
 	end.
