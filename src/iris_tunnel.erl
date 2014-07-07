@@ -63,7 +63,7 @@ start_link(Id, ChunkLimit, Logger) ->
 	gen_server:start_link(?MODULE, {self(), Id, ChunkLimit, Logger}, []).
 
 
--spec finalize(Tunnel :: pid(), Result :: {ok, ChunkLimit :: pos_integer()} | 
+-spec finalize(Tunnel :: pid(), Result :: {ok, ChunkLimit :: pos_integer()} |
 	{error, Reason :: term()}) -> ok.
 
 finalize(Tunnel, Result) ->
@@ -73,7 +73,13 @@ finalize(Tunnel, Result) ->
 -spec potentially_send() -> ok.
 
 potentially_send() ->
- ok = gen_server:cast(self(), potentially_send).
+ 	gen_server:cast(self(), potentially_send).
+
+
+-spec potentially_recv() -> ok.
+
+potentially_recv() ->
+	gen_server:cast(self(), potentially_recv).
 
 
  % =============================================================================
@@ -110,22 +116,24 @@ handle_close(Tunnel, Reason) ->
 %% =============================================================================
 
 -record(state, {
-	id,        %% Tunnel identifier for de/multiplexing
-	conn,      %% Connection to the local relay
+	id,         %% Tunnel identifier for de/multiplexing
+	conn,       %% Connection to the local relay
 
 	chunkLimit, %% Maximum length of a data payload
 	chunkBuf,   %% Current message being assembled
+	chunkSize,  %% Current size of the message being assembled
+	chunkTotal, %% Total size of the message to assemble
 
-	itoaBuf,   %% Iris to application message buffer
-	itoaTasks, %% Iris to application pending receive tasks
+	itoaBuf,    %% Iris to application message buffer
+	itoaTasks,  %% Iris to application pending receive tasks
 
-	atoiSpace, %% Application to Iris space allowance
-	atoiTasks, %% Application to Iris pending send tasks
+	atoiSpace,  %% Application to Iris space allowance
+	atoiTasks,  %% Application to Iris pending send tasks
 
-	term,      %% Termination flag to prevent new sends
-  closer,    %% Processes waiting for the close ack
-  stat,      %% Failure reason, if any received
-  logger     %% Logger with connection and tunnel ids injected
+	term,       %% Termination flag to prevent new sends
+  closer,     %% Processes waiting for the close ack
+  stat,       %% Failure reason, if any received
+  logger      %% Logger with connection and tunnel ids injected
 }).
 
 
@@ -139,7 +147,9 @@ init({Conn, Id, ChunkLimit, Logger}) ->
 		id         = Id,
 		conn       = Conn,
 		chunkLimit = ChunkLimit,
-		chunkBuf   = <<>>,
+		chunkBuf   = [],
+		chunkSize  = 0,
+		chunkTotal = 0,
 		itoaBuf    = [],
 		itoaTasks  = [],
 		atoiSpace  = 0,
@@ -182,7 +192,7 @@ handle_call({schedule_send, Payload, Timeout}, From, State = #state{chunkLimit =
 			1 -> Size;
 			_ -> 0
 		end,
-		Chunk = binary:part(Payload, (Index - 1) * Limit, erlang:min(Index * Limit, Size)),
+		Chunk = binary:part(Payload, (Index - 1) * Limit, erlang:min(Limit, Size - (Index - 1) * Limit)),
 		Task = case Index < Pieces of
 			true  -> {Id, SizeOrCont, Chunk};
 			false -> {Id, SizeOrCont, Chunk, From, TRef}
@@ -199,7 +209,7 @@ handle_call({schedule_send, Payload, Timeout}, From, State = #state{chunkLimit =
 handle_call({recv, _Timeout}, _From, State = #state{itoaBuf = [], term = true}) ->
 	{reply, {error, closed}, State};
 
-handle_call({recv, Timeout}, From, State = #state{itoaBuf = [], itoaTasks = Pend}) ->
+handle_call({recv, Timeout}, From, State = #state{itoaTasks = Pend}) ->
 	Id = make_ref(),
 	TRef = case Timeout of
 		infinity -> nil;
@@ -208,13 +218,8 @@ handle_call({recv, Timeout}, From, State = #state{itoaBuf = [], itoaTasks = Pend
 			Ref
 	end,
 	Task = {Id, From, TRef},
+	potentially_recv(),
 	{noreply, State#state{itoaTasks = [Task | Pend]}};
-
-handle_call({recv, _Timeout}, _From, State = #state{itoaBuf = [Msg | Rest]}) ->
-	case iris_conn:tunnel_allowance(State#state.conn, State#state.id, byte_size(Msg)) of
-		ok    -> {reply, {ok, Msg}, State#state{itoaBuf = Rest}};
-		Error -> {reply, Error, State}
-	end;
 
 %% Notifies the conn of the close request (which may or may not forward it to
 %% the Iris node), and terminates the process.
@@ -252,6 +257,24 @@ handle_cast(potentially_send, State = #state{atoiTasks = [Task | Rest], atoiSpac
 		false -> {noreply, State}
 	end;
 
+handle_cast(potentially_recv, State = #state{itoaTasks = []}) ->
+	{noreply, State};
+
+handle_cast(potentially_recv, State = #state{itoaBuf = []}) ->
+	{noreply, State};
+
+handle_cast(potentially_recv, State = #state{itoaTasks = [Wait | Others], itoaBuf = [First | Rest]}) ->
+	{_, From, TRef} = Wait,
+	case TRef of
+		nil    -> ok;
+		_Other ->	{ok, cancel} = timer:cancel(TRef)
+	end,
+	case iris_conn:tunnel_allowance(State#state.conn, State#state.id, byte_size(First)) of
+		ok    -> gen_server:reply(From, {ok, First});
+		Error -> gen_server:reply(From, Error)
+	end,
+	{noreply, State#state{itoaTasks = Others, itoaBuf = Rest}};
+
 %% Increments the available outbound space and invokes a potential send.
 handle_cast({handle_allowance, Space}, State = #state{atoiSpace = Allowance}) ->
 	ok = potentially_send(),
@@ -259,20 +282,36 @@ handle_cast({handle_allowance, Space}, State = #state{atoiSpace = Allowance}) ->
 
 %% Accepts an inbound data packet, and either delivers it to a pending receive
 %% or buffers it locally.
-handle_cast({handle_transfer, SizeOrCont, Payload}, State = #state{itoaTasks = [], itoaBuf = Ready}) ->
-	{noreply, State#state{itoaBuf = Ready ++ [Payload]}};
+handle_cast({handle_transfer, SizeOrCont, Payload}, State = #state{itoaBuf = Queue}) ->
+  % If a new message is arriving, dump anything stored before
+	{Buffer, Arrived, Total} = case SizeOrCont of
+		0 -> {State#state.chunkBuf, State#state.chunkSize, State#state.chunkTotal};
+		_ ->
+			PrevArrive = State#state.chunkSize,
+			PrevTotal  = State#state.chunkTotal,
+			case PrevArrive of
+				0 -> ok;
+				_ ->
+					% A large transfer timed out, new started, grant the partials allowance
+					iris_logger:warn(State#state.logger, "incomplete message discarded",
+						[{size, PrevTotal}, {arrived, PrevArrive}]
+					),
+					iris_conn:tunnel_allowance(State#state.conn, State#state.id, PrevArrive)
+			end,
+			{[], 0, SizeOrCont}
+	end,
 
-handle_cast({handle_transfer, SizeOrCont, Payload}, State = #state{itoaTasks = [Task | Rest]}) ->
-	{_, From, TRef} = Task,
-	case TRef of
-		nil    -> ok;
-		_Other ->	{ok, cancel} = timer:cancel(TRef)
-	end,
-	case iris_conn:tunnel_allowance(State#state.conn, State#state.id, byte_size(Payload)) of
-		ok    -> gen_server:reply(From, {ok, Payload});
-		Error -> gen_server:reply(From, Error)
-	end,
-	{noreply, State#state{itoaTasks = Rest}};
+	% Append the new chunk and check completion
+	NewBuffer  = [Payload | Buffer],
+	NewArrived = Arrived + byte_size(Payload),
+	case NewArrived of
+		Total ->
+			potentially_recv(),
+			Message = binary:list_to_bin(lists:reverse(NewBuffer)),
+			{noreply, State#state{itoaBuf = Queue ++ [Message], chunkBuf = [], chunkSize = 0, chunkTotal = 0}};
+		_ ->
+			{noreply, State#state{chunkBuf = NewBuffer, chunkSize = NewArrived, chunkTotal = Total}}
+	end;
 
 %% Handles the graceful remote closure of the tunnel.
 handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->

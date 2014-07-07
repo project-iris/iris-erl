@@ -140,7 +140,7 @@ tunnel_chunking_test() ->
   {ok, Tunnel} = iris_conn:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
 
   % Create and transfer a huge message
-  Blob       = list_to_binary([X rem 256 || X <- lists:seq(1, 16*1024*1024)]),
+  Blob       = list_to_binary([X rem 256 || X <- lists:seq(1, 4*1024*1024)]),
   ok         = iris_tunnel:send(Tunnel, Blob, 10000),
   {ok, Blob} = iris_tunnel:recv(Tunnel, 10000),
 
