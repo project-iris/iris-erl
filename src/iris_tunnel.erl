@@ -125,10 +125,10 @@ handle_close(Tunnel, Reason) ->
 	chunkTotal, %% Total size of the message to assemble
 
 	itoaBuf,    %% Iris to application message buffer
-	itoaTasks,  %% Iris to application pending receive tasks
+	itoaPend,   %% Iris to application pending receive
 
 	atoiSpace,  %% Application to Iris space allowance
-	atoiTasks,  %% Application to Iris pending send tasks
+	atoiPend,   %% Application to Iris pending send
 
 	term,       %% Termination flag to prevent new sends
   closer,     %% Processes waiting for the close ack
@@ -151,9 +151,9 @@ init({Conn, Id, ChunkLimit, Logger}) ->
 		chunkSize  = 0,
 		chunkTotal = 0,
 		itoaBuf    = [],
-		itoaTasks  = [],
+		itoaPend   = nil,
 		atoiSpace  = 0,
-		atoiTasks  = [],
+		atoiPend   = nil,
 		term       = false,
     closer     = nil,
     stat       = "",
@@ -174,52 +174,37 @@ handle_call({finalize, {error, Reason}}, _From, State) ->
 handle_call({schedule_send, _Payload, _Timeout}, _From, State = #state{term = true}) ->
 	{reply, {error, closed}, State};
 
-handle_call({schedule_send, Payload, Timeout}, From, State = #state{chunkLimit = Limit, atoiTasks = Pend}) ->
+handle_call({schedule_send, Payload, Timeout}, From, State = #state{atoiPend = nil}) ->
 	% Start a timer for the operation to complete
-	Id = make_ref(),
 	TRef = case Timeout of
 		infinity -> nil;
 		_Other ->
-			{ok, Ref} = timer:send_after(Timeout, {timeout, send, Id}),
+			{ok, Ref} = timer:send_after(Timeout, {timeout, send}),
 			Ref
 	end,
 
-	% Split the message into a list of tasks
-	Size   = byte_size(Payload),
-	Pieces = (Size + Limit - 1) div Limit,
-	Tasks  = lists:foldl(fun(Index, Tasks) ->
-		SizeOrCont = case Index of
-			1 -> Size;
-			_ -> 0
-		end,
-		Chunk = binary:part(Payload, (Index - 1) * Limit, erlang:min(Limit, Size - (Index - 1) * Limit)),
-		Task = case Index < Pieces of
-			true  -> {Id, SizeOrCont, Chunk};
-			false -> {Id, SizeOrCont, Chunk, From, TRef}
-		end,
-		[Task | Tasks]
-	end, [], lists:seq(1, Pieces)),
-
-	% Schedule the pieces and initiate a potential send
-	ok = potentially_send(),
-	{noreply, State#state{atoiTasks = lists:append(Pend, lists:reverse(Tasks))}};
+	% Create the pending send task and potentially send a chunk
+	ok   = potentially_send(),
+	Task = {Payload, 0, From, TRef},
+	{noreply, State#state{atoiPend = Task}};
 
 %% Retrieves an inbound message from the local buffer and acks remote endpoint.
 %% If no message is available locally, a timer is started and the call blocks.
 handle_call({recv, _Timeout}, _From, State = #state{itoaBuf = [], term = true}) ->
 	{reply, {error, closed}, State};
 
-handle_call({recv, Timeout}, From, State = #state{itoaTasks = Pend}) ->
-	Id = make_ref(),
+handle_call({recv, Timeout}, From, State = #state{itoaPend = nil}) ->
 	TRef = case Timeout of
 		infinity -> nil;
 		_Other ->
-			{ok, Ref} = timer:send_after(Timeout, {timeout, recv, Id}),
+			{ok, Ref} = timer:send_after(Timeout, {timeout, recv}),
 			Ref
 	end,
-	Task = {Id, From, TRef},
-	potentially_recv(),
-	{noreply, State#state{itoaTasks = [Task | Pend]}};
+
+	% Create a pending receive task and potentially receive a message
+	ok   = potentially_recv(),
+	Task = {From, TRef},
+	{noreply, State#state{itoaPend = Task}};
 
 %% Notifies the conn of the close request (which may or may not forward it to
 %% the Iris node), and terminates the process.
@@ -233,38 +218,55 @@ handle_call(close, From, State = #state{}) ->
 	end.
 
 %% If there is enough allowance and data schedules, sends a chunk to the relay.
-handle_cast(potentially_send, State = #state{atoiTasks = []}) ->
+handle_cast(potentially_send, State = #state{atoiPend = nil}) ->
 	{noreply, State};
 
-handle_cast(potentially_send, State = #state{atoiTasks = [Task | Rest], atoiSpace = Allowance}) ->
-	Size = byte_size(erlang:element(3, Task)),
+handle_cast(potentially_send, State = #state{atoiPend = Task, atoiSpace = Allowance}) ->
+	% Expand the task into it's components
+	{Payload, Sent, From, TRef} = Task,
+	Size = erlang:min(byte_size(Payload) - Sent, State#state.chunkLimit),
 	case Allowance >= Size of
 		true ->
-			SizeOrCont = erlang:element(2, Task),
-			Chunk      = erlang:element(3, Task),
+			% Calculate the chunk size and fetch the data blob
+			SizeOrCont = case Sent of
+				0 -> byte_size(Payload);
+				_ -> 0
+			end,
+			Chunk = binary:part(Payload, Sent, Size),
+
+			NewAllowance = Allowance - Size,
+			NewSent      = Sent + Size,
+			NewTask      = {Payload, NewSent, From, TRef},
+
+			% Send over a data chunk
 			ok = iris_conn:tunnel_send(State#state.conn, State#state.id, SizeOrCont, Chunk),
-			ok = potentially_send(),
-			case Task of
-				{_Id, _SizeOrCont, _Chunk}             -> ok;
-				{_Id, _SizeOrCont, _Chunk, From, TRef} ->
+
+			% Either finish, or enqueue another send
+			case NewSent == byte_size(Payload) of
+				 true ->
+					% Message fully sent, reply to the sender
 					case TRef of
 						nil -> ok;
 						_   -> {ok, cancel} = timer:cancel(TRef)
 					end,
-					gen_server:reply(From, ok)
-			end,
-			{noreply, State#state{atoiTasks = Rest}};
+					gen_server:reply(From, ok),
+					{noreply, State#state{atoiPend = nil, atoiSpace = NewAllowance}};
+				false ->
+					% Chunks still remaining, potentially send another one
+					ok = potentially_send(),
+					{noreply, State#state{atoiPend = NewTask, atoiSpace = NewAllowance}}
+			end;
 		false -> {noreply, State}
 	end;
 
-handle_cast(potentially_recv, State = #state{itoaTasks = []}) ->
+handle_cast(potentially_recv, State = #state{itoaPend = nil}) ->
 	{noreply, State};
 
 handle_cast(potentially_recv, State = #state{itoaBuf = []}) ->
 	{noreply, State};
 
-handle_cast(potentially_recv, State = #state{itoaTasks = [Wait | Others], itoaBuf = [First | Rest]}) ->
-	{_, From, TRef} = Wait,
+handle_cast(potentially_recv, State = #state{itoaPend = Wait, itoaBuf = [First | Rest]}) ->
+	{From, TRef} = Wait,
 	case TRef of
 		nil    -> ok;
 		_Other ->	{ok, cancel} = timer:cancel(TRef)
@@ -273,7 +275,7 @@ handle_cast(potentially_recv, State = #state{itoaTasks = [Wait | Others], itoaBu
 		ok    -> gen_server:reply(From, {ok, First});
 		Error -> gen_server:reply(From, Error)
 	end,
-	{noreply, State#state{itoaTasks = Others, itoaBuf = Rest}};
+	{noreply, State#state{itoaPend = nil, itoaBuf = Rest}};
 
 %% Increments the available outbound space and invokes a potential send.
 handle_cast({handle_allowance, Space}, State = #state{atoiSpace = Allowance}) ->
@@ -324,57 +326,57 @@ handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->
     	{error, Reason}
   end,
 
-  % Notify all pending receives of the closure
-  lists:foreach(fun({_, From, TRef}) ->
-    case TRef of
-      nil    -> ok;
-      _Other -> {ok, cancel} = timer:cancel(TRef)
-    end,
-    gen_server:reply(From, {error, closed})
-  end, State#state.itoaTasks),
+  % Notify any pending receive of the closure
+  case State#state.itoaPend of
+  	nil                  -> ok;
+  	{Receiver, RecvTRef} ->
+	    case RecvTRef of
+	      nil -> ok;
+	      _   -> {ok, cancel} = timer:cancel(RecvTRef)
+	    end,
+	    gen_server:reply(Receiver, {error, closed})
+  end,
 
-  % Notify all pending sends of the closure
-  lists:foreach(fun(Task) ->
-    case Task of
-      {_Id, _SizeOrCont, _Chunk, From, TRef} ->
-        case TRef of
-          nil    -> ok;
-          _Other -> {ok, cancel} = timer:cancel(TRef)
-        end,
-        gen_server:reply(From, {error, closed});
-      {_Id, _SizeOrCont, _Chunk} -> ok
-    end
-  end, State#state.atoiTasks),
+  % Notify any pending send of the closure
+  case State#state.atoiPend of
+  	nil                                 -> ok;
+    {_Payload, _Sent, Sender, SendTRef} ->
+      case SendTRef of
+        nil -> ok;
+        _   -> {ok, cancel} = timer:cancel(SendTRef)
+      end,
+      gen_server:reply(Sender, {error, closed})
+  end,
 
   % Notify the connection to dump the tunnel
   ok = iris_conn:handle_tunnel_close(Conn, Id),
 
   % Notify the closer (if any) of the termination
   case State#state.closer of
-    nil  -> {noreply, State#state{itoaTasks = [], term = true, stat = Status}};
+    nil  -> {noreply, State#state{itoaPend = nil, term = true, stat = Status}};
     From ->
       gen_server:reply(From, Status),
-      {stop, normal, State#state{itoaTasks = [], term = true, stat = Reason}}
+      {stop, normal, State#state{itoaPend = nil, term = true, stat = Reason}}
   end.
 
 
 %% Notifies the pending send of failure due to timeout. In the rare case of the
 %% timeout happening right before the timer is canceled, the event is dropped.
-handle_info({timeout, send, Id}, State = #state{atoiTasks = Pend}) ->
-	case lists:keyfind(Id, 1, Pend) of
-		false            -> ok;
-		{Id, From, _, _} -> gen_server:reply(From, {error, timeout})
+handle_info({timeout, send}, State = #state{atoiPend = Task}) ->
+	case Task of
+		nil                            -> ok;
+		{_Payload, _Sent, From, _TRef} -> gen_server:reply(From, {error, timeout})
 	end,
-	{noreply, State#state{atoiTasks = lists:keydelete(Id, 1, Pend)}};
+	{noreply, State#state{atoiPend = nil}};
 
 %% Notifies the pending recv of failure due to timeout. In the rare case of the
 %% timeout happening right before the timer is canceled, the event is dropped.
-handle_info({timeout, recv, Id}, State = #state{itoaTasks = Pend}) ->
-	case lists:keyfind(Id, 1, Pend) of
-		false         -> ok;
-		{Id, From, _} -> gen_server:reply(From, {error, timeout})
+handle_info({timeout, recv}, State = #state{itoaPend = Task}) ->
+	case Task of
+		nil           -> ok;
+		{From, _TRef} -> gen_server:reply(From, {error, timeout})
 	end,
-	{noreply, State#state{itoaTasks = lists:keydelete(Id, 1, Pend)}}.
+	{noreply, State#state{itoaPend = nil}}.
 
 %% Cleanup method, does nothing really.
 terminate(_Reason, _State) -> ok.

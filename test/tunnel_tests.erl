@@ -140,9 +140,44 @@ tunnel_chunking_test() ->
   {ok, Tunnel} = iris_conn:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
 
   % Create and transfer a huge message
-  Blob       = list_to_binary([X rem 256 || X <- lists:seq(1, 4*1024*1024)]),
+  Blob = list_to_binary([
+  	[X rem 256, X rem 256, X rem 256, X rem 256, X rem 256, X rem 256, X rem 256, X rem 256]
+  	|| X <- lists:seq(1, 1024*1024)]
+  ),
   ok         = iris_tunnel:send(Tunnel, Blob, 10000),
   {ok, Blob} = iris_tunnel:recv(Tunnel, 10000),
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
+
+%% Tests that a tunnel remains operational even after overloads (partially
+%% transferred huge messages timeouting).
+tunnel_overload_test() ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Construct the tunnel
+  {ok, Tunnel} = iris_conn:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
+
+  % Overload the tunnel by partially transferring huge messages
+  Blob = list_to_binary([
+  	[X rem 256, X rem 256, X rem 256, X rem 256, X rem 256, X rem 256, X rem 256, X rem 256]
+  	|| X <- lists:seq(1, 1024*1024)]
+  ),
+  lists:foreach(fun(_) ->
+		{error, timeout} = iris_tunnel:send(Tunnel, Blob, 1)
+  end, lists:seq(1, 10)),
+
+  % Verify that the tunnel is still operational
+  Data = list_to_binary([0, 1, 0, 2, 0, 3, 0, 4]),
+  lists:foreach(fun(_) -> % Iteration's important, the first will always cross (allowance ignore)
+		ok         = iris_tunnel:send(Tunnel, Data, 1000),
+		{ok, Data} = iris_tunnel:recv(Tunnel, 1000)
+  end, lists:seq(1, 10)),
 
   % Unregister the service
   ok = iris_server:stop(Server).
