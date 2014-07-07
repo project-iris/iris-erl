@@ -63,10 +63,11 @@ start_link(Id, ChunkLimit, Logger) ->
 	gen_server:start_link(?MODULE, {self(), Id, ChunkLimit, Logger}, []).
 
 
--spec finalize(Tunnel :: pid(), ChunkLimit :: pos_integer()) -> ok.
+-spec finalize(Tunnel :: pid(), Result :: {ok, ChunkLimit :: pos_integer()} | 
+	{error, Reason :: term()}) -> ok.
 
-finalize(Tunnel, ChunkLimit) ->
-	gen_server:call(Tunnel, {finalize, ChunkLimit}).
+finalize(Tunnel, Result) ->
+	gen_server:call(Tunnel, {finalize, Result}).
 
 
 -spec potentially_send() -> ok.
@@ -74,7 +75,8 @@ finalize(Tunnel, ChunkLimit) ->
 potentially_send() ->
  ok = gen_server:cast(self(), potentially_send).
 
-%% =============================================================================
+
+ % =============================================================================
 %% Internal API callback functions
 %% =============================================================================
 
@@ -149,8 +151,13 @@ init({Conn, Id, ChunkLimit, Logger}) ->
 	}}.
 
 
-handle_call({finalize, ChunkLimit}, _From, State) ->
+handle_call({finalize, {ok, ChunkLimit}}, _From, State) ->
 	{reply, ok, State#state{chunkLimit = ChunkLimit}};
+
+
+handle_call({finalize, {error, Reason}}, _From, State) ->
+	{stop, normal, ok, State};
+
 
 %% Forwards an outbound message to the remote endpoint of the conn. If the send
 %% limit is reached, then the call is blocked and a countdown timer started.

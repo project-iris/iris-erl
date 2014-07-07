@@ -104,7 +104,7 @@ build_exchange_verify(Id, Conn, Tunnels, Exchanges) ->
         end, lists:seq(1, Exchanges)),
 
   	  	% Tear down the tunnel
-  	  	iris_tunnel:close(Tun)
+  	  	ok = iris_tunnel:close(Tun)
       catch
         error:Exception -> iris_barrier:exit(Barrier, Exception)
       end,
@@ -114,6 +114,18 @@ build_exchange_verify(Id, Conn, Tunnels, Exchanges) ->
 
   % Schedule the parallel operations
   ok = iris_barrier:wait(Barrier).
+
+
+%% Tests that unanswered tunnels timeout correctly.
+tunnel_timeout_test() ->
+  % Connect to the local relay
+  {ok, Conn} = iris_client:start(?CONFIG_RELAY),
+
+  % Open a new tunnel to a non existent server
+  {error, timeout} = iris_conn:tunnel(Conn, ?CONFIG_CLUSTER, 100),
+
+  % Disconnect from the local relay
+  ok = iris_client:stop(Conn).
 
 
 %% =============================================================================

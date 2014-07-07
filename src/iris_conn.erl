@@ -398,17 +398,18 @@ handle_cast({handle_tunnel_result, TunId, Result}, State) ->
 	{TunId, Tunnel}       = hd(ets:lookup(State#state.tunLive, TunId)),
 	ets:delete(State#state.tunPend, TunId),
 
+	% Finalize the tunnel construction
+	ok = iris_tunnel:finalize(Tunnel, Result),
+
 	% Reply to the pending process and return
 	Reply = case Result of
 		{ok, ChunkLimit} ->
 			iris_logger:info(Logger, "tunnel construction completed", [{chunk_limit, ChunkLimit}]),
-			ok = iris_tunnel:finalize(Tunnel, ChunkLimit),
 			ok = iris_proto:send_tunnel_allowance(State#state.sock, TunId, iris_limits:default_tunnel_buffer()),
 			{ok, Tunnel};
 		{error, Reason} ->
 			iris_logger:warn(Logger, "tunnel construction failed", [{reason, Reason}]),
 			true = ets:delete(State#state.tunLive, TunId),
-			ok = iris_tunnel:stop(Tunnel),
 			{error, Reason}
 	end,
 	gen_server:reply(From, Reply),

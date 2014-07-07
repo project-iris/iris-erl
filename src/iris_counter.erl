@@ -31,7 +31,7 @@ next_id(Name) ->
           true -> ok
         end
       catch
-        badarg ->
+        error:badarg ->
           % Register sometimes failed with badarg
           Pid ! exit
       end,
