@@ -128,6 +128,26 @@ tunnel_timeout_test() ->
   ok = iris_client:stop(Conn).
 
 
+%% Tests that large messages get delivered properly.
+tunnel_chunking_test() ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Construct the tunnel
+  {ok, Tunnel} = iris_conn:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
+
+  % Create and transfer a huge message
+  Blob       = list_to_binary([X rem 256 || X <- lists:seq(1, 16*1024*1024)]),
+  ok         = iris_tunnel:send(Tunnel, Blob, 10000),
+  {ok, Blob} = iris_tunnel:recv(Tunnel, 10000),
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
+
 %% =============================================================================
 %% Iris server callback methods
 %% =============================================================================
