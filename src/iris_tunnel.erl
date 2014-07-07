@@ -34,7 +34,7 @@ send(Tunnel, Message, Timeout) ->
 	{ok, Message :: binary()} | {error, Reason :: atom()}.
 
 recv(Tunnel, Timeout) ->
-	gen_server:call(Tunnel, {recv, Timeout}, infinity).
+	gen_server:call(Tunnel, {schedule_recv, Timeout}, infinity).
 
 
 %% Forwards the close request to the tunnel.
@@ -165,7 +165,7 @@ handle_call({finalize, {ok, ChunkLimit}}, _From, State) ->
 	{reply, ok, State#state{chunkLimit = ChunkLimit}};
 
 
-handle_call({finalize, {error, Reason}}, _From, State) ->
+handle_call({finalize, {error, _Reason}}, _From, State) ->
 	{stop, normal, ok, State};
 
 
@@ -179,7 +179,7 @@ handle_call({schedule_send, Payload, Timeout}, From, State = #state{atoiPend = n
 	TRef = case Timeout of
 		infinity -> nil;
 		_Other ->
-			{ok, Ref} = timer:send_after(Timeout, {timeout, send}),
+			{ok, Ref} = timer:send_after(Timeout, send_timeout),
 			Ref
 	end,
 
@@ -190,14 +190,14 @@ handle_call({schedule_send, Payload, Timeout}, From, State = #state{atoiPend = n
 
 %% Retrieves an inbound message from the local buffer and acks remote endpoint.
 %% If no message is available locally, a timer is started and the call blocks.
-handle_call({recv, _Timeout}, _From, State = #state{itoaBuf = [], term = true}) ->
+handle_call({schedule_recv, _Timeout}, _From, State = #state{itoaBuf = [], term = true}) ->
 	{reply, {error, closed}, State};
 
-handle_call({recv, Timeout}, From, State = #state{itoaPend = nil}) ->
+handle_call({schedule_recv, Timeout}, From, State = #state{itoaPend = nil}) ->
 	TRef = case Timeout of
 		infinity -> nil;
 		_Other ->
-			{ok, Ref} = timer:send_after(Timeout, {timeout, recv}),
+			{ok, Ref} = timer:send_after(Timeout, recv_timeout),
 			Ref
 	end,
 
@@ -362,7 +362,7 @@ handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->
 
 %% Notifies the pending send of failure due to timeout. In the rare case of the
 %% timeout happening right before the timer is canceled, the event is dropped.
-handle_info({timeout, send}, State = #state{atoiPend = Task}) ->
+handle_info(send_timeout, State = #state{atoiPend = Task}) ->
 	case Task of
 		nil                            -> ok;
 		{_Payload, _Sent, From, _TRef} -> gen_server:reply(From, {error, timeout})
@@ -371,7 +371,7 @@ handle_info({timeout, send}, State = #state{atoiPend = Task}) ->
 
 %% Notifies the pending recv of failure due to timeout. In the rare case of the
 %% timeout happening right before the timer is canceled, the event is dropped.
-handle_info({timeout, recv}, State = #state{itoaPend = Task}) ->
+handle_info(recv_timeout, State = #state{itoaPend = Task}) ->
 	case Task of
 		nil           -> ok;
 		{From, _TRef} -> gen_server:reply(From, {error, timeout})
