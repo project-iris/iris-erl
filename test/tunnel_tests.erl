@@ -85,12 +85,29 @@ build_exchange_verify(Id, Conn, Tunnels, Exchanges) ->
   Barrier = iris_barrier:new(Tunnels),
   lists:foreach(fun(Tunnel) ->
 	  spawn(fun() ->
-	  	% Open a tunnel to the service cluster
-	  	{ok, Tun} = iris_client:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
+      try
+  	  	% Open a tunnel to the service cluster
+  	  	{ok, Tun} = iris_client:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
 
-	  	% Tear down the tunnel
-      timer:sleep(1000),
-	  	iris_tunnel:close(Tun),
+        % Serialize a batch of messages
+        lists:foreach(fun(Index) ->
+          Message = io_lib:format("~s, tunnel #~p, message #~p", [Id, Tunnel, Index]),
+          Binary  = list_to_binary(Message),
+          ok = iris_tunnel:send(Tun, Binary, 1000)
+        end, lists:seq(1, Exchanges)),
+
+        % Read back the echo stream and verify
+        lists:foreach(fun(Index) ->
+          Message = io_lib:format("~s, tunnel #~p, message #~p", [Id, Tunnel, Index]),
+          Binary  = list_to_binary(Message),
+          {ok, Binary} = iris_tunnel:recv(Tun, 1000)
+        end, lists:seq(1, Exchanges)),
+
+  	  	% Tear down the tunnel
+  	  	iris_tunnel:close(Tun)
+      catch
+        error:Exception -> iris_barrier:exit(Barrier, Exception)
+      end,
       iris_barrier:exit(Barrier)
 	  end)
 	end, lists:seq(1, Tunnels)),
@@ -115,14 +132,13 @@ handle_tunnel(Tunnel, State) ->
 	{noreply, State}.
 
 echoer(Tunnel) ->
-	%case iris:recv(Tunnel, infinity) of
-%		{ok, Message} ->
-%			ok = iris:send(Tunnel, Message, infinity),
-%			echoer(Tunnel);
-%		{error, _Reason} ->
-%			ok = iris:close(Tunnel)
-%	end.
-	iris_tunnel:close(Tunnel).
+	case iris_tunnel:recv(Tunnel, infinity) of
+		{ok, Message} ->
+			ok = iris_tunnel:send(Tunnel, Message, infinity),
+			echoer(Tunnel);
+		{error, closed} ->
+			ok = iris_tunnel:close(Tunnel)
+	end.
 
 %% No state to clean up.
 terminate(_Reason, _State) -> ok.

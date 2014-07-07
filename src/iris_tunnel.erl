@@ -9,7 +9,8 @@
 
 -module(iris_tunnel).
 -export([send/3, recv/2, close/1]).
--export([start_link/3, handle_allowance/2, handle_transfer/3, handle_close/2]).
+-export([start_link/2, start_link/3, finalize/2, handle_allowance/2,
+	handle_transfer/3, handle_close/2]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
@@ -19,13 +20,6 @@
 %% =============================================================================
 %% External API functions
 %% =============================================================================
-
--spec start_link(Id :: non_neg_integer(), ChunkLimit :: pos_integer(),
-	Logger :: iris_logger:logger()) -> {ok, Server :: pid()} | {error, Reason :: term()}.
-
-start_link(Id, ChunkLimit, Logger) ->
-	gen_server:start(?MODULE, {self(), Id, ChunkLimit, Logger}, []).
-
 
 %% Forwards the message to be sent to the tunnel process.
 -spec send(Tunnel :: pid(), Message :: binary(), Timeout :: timeout()) ->
@@ -54,6 +48,27 @@ close(Tunnel) ->
 %% =============================================================================
 %% Internal API functions
 %% =============================================================================
+
+-spec start_link(Id :: non_neg_integer(), Logger :: iris_logger:logger())
+	-> {ok, Server :: pid()} | {error, Reason :: term()}.
+
+start_link(Id, Logger) ->
+	gen_server:start_link(?MODULE, {self(), Id, 0, Logger}, []).
+
+
+-spec start_link(Id :: non_neg_integer(), ChunkLimit :: pos_integer(),
+	Logger :: iris_logger:logger()) -> {ok, Server :: pid()} | {error, Reason :: term()}.
+
+start_link(Id, ChunkLimit, Logger) ->
+	gen_server:start_link(?MODULE, {self(), Id, ChunkLimit, Logger}, []).
+
+
+-spec finalize(Tunnel :: pid(), ChunkLimit :: pos_integer()) -> ok.
+
+finalize(Tunnel, ChunkLimit) ->
+	gen_server:call(Tunnel, {finalize, ChunkLimit}).
+
+
 -spec potentially_send() -> ok.
 
 potentially_send() ->
@@ -133,6 +148,10 @@ init({Conn, Id, ChunkLimit, Logger}) ->
     logger     = Logger
 	}}.
 
+
+handle_call({finalize, ChunkLimit}, _From, State) ->
+	{reply, ok, State#state{chunkLimit = ChunkLimit}};
+
 %% Forwards an outbound message to the remote endpoint of the conn. If the send
 %% limit is reached, then the call is blocked and a countdown timer started.
 handle_call({schedule_send, _Payload, _Timeout}, _From, State = #state{term = true}) ->
@@ -185,7 +204,7 @@ handle_call({recv, Timeout}, From, State = #state{itoaBuf = [], itoaTasks = Pend
 	{noreply, State#state{itoaTasks = [Task | Pend]}};
 
 handle_call({recv, _Timeout}, _From, State = #state{itoaBuf = [Msg | Rest]}) ->
-	case iris_relay:tunnel_ack(State#state.conn, State#state.id) of
+	case iris_conn:tunnel_allowance(State#state.conn, State#state.id, byte_size(Msg)) of
 		ok    -> {reply, {ok, Msg}, State#state{itoaBuf = Rest}};
 		Error -> {reply, Error, State}
 	end;
@@ -216,7 +235,10 @@ handle_cast(potentially_send, State = #state{atoiTasks = [Task | Rest], atoiSpac
 			case Task of
 				{_Id, _SizeOrCont, _Chunk}             -> ok;
 				{_Id, _SizeOrCont, _Chunk, From, TRef} ->
-					{ok, cancel} = timer:cancel(TRef),
+					case TRef of
+						nil -> ok;
+						_   -> {ok, cancel} = timer:cancel(TRef)
+					end,
 					gen_server:reply(From, ok)
 			end,
 			{noreply, State#state{atoiTasks = Rest}};
@@ -227,6 +249,23 @@ handle_cast(potentially_send, State = #state{atoiTasks = [Task | Rest], atoiSpac
 handle_cast({handle_allowance, Space}, State = #state{atoiSpace = Allowance}) ->
 	ok = potentially_send(),
 	{noreply, State#state{atoiSpace = Allowance + Space}};
+
+%% Accepts an inbound data packet, and either delivers it to a pending receive
+%% or buffers it locally.
+handle_cast({handle_transfer, SizeOrCont, Payload}, State = #state{itoaTasks = [], itoaBuf = Ready}) ->
+	{noreply, State#state{itoaBuf = Ready ++ [Payload]}};
+
+handle_cast({handle_transfer, SizeOrCont, Payload}, State = #state{itoaTasks = [Task | Rest]}) ->
+	{_, From, TRef} = Task,
+	case TRef of
+		nil    -> ok;
+		_Other ->	{ok, cancel} = timer:cancel(TRef)
+	end,
+	case iris_conn:tunnel_allowance(State#state.conn, State#state.id, byte_size(Payload)) of
+		ok    -> gen_server:reply(From, {ok, Payload});
+		Error -> gen_server:reply(From, Error)
+	end,
+	{noreply, State#state{itoaTasks = Rest}};
 
 %% Handles the graceful remote closure of the tunnel.
 handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->
@@ -270,24 +309,7 @@ handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->
     From ->
       gen_server:reply(From, Status),
       {stop, normal, State#state{itoaTasks = [], term = true, stat = Reason}}
-  end;
-
-%% Accepts an inbound data packet, and either delivers it to a pending receive
-%% or buffers it locally.
-handle_cast({data, Message}, State = #state{itoaTasks = [], itoaBuf = Ready}) ->
-	{noreply, State#state{itoaBuf = Ready ++ [Message]}};
-
-handle_cast({data, Message}, State = #state{itoaTasks = [Task | Rest]}) ->
-	{_, From, TRef} = Task,
-	case TRef of
-		nil    -> ok;
-		_Other ->	{ok, cancel} = timer:cancel(TRef)
-	end,
-	case iris_relay:tunnel_ack(State#state.conn, State#state.id) of
-		ok    -> gen_server:reply(From, {ok, Message});
-		Error -> gen_server:reply(From, Error)
-	end,
-	{noreply, State#state{itoaTasks = Rest}}.
+  end.
 
 
 %% Notifies the pending send of failure due to timeout. In the rare case of the

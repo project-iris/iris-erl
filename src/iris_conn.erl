@@ -10,7 +10,7 @@
 -module(iris_conn).
 -export([connect/2, connect_link/2, register/5, register_link/5, close/1,
 	broadcast/3, request/4, reply/2, subscribe/5, publish/3, unsubscribe/2,
-	tunnel/3, tunnel_send/4, tunnel_ack/2, tunnel_close/2]).
+	tunnel/3, tunnel_send/4, tunnel_allowance/3, tunnel_close/2]).
 
 -export([handle_reply/3, handle_tunnel_init/3, handle_tunnel_result/3,
 	handle_tunnel_close/2]).
@@ -129,11 +129,11 @@ tunnel_send(Connection, TunId, SizeOrCont, Message) ->
 
 
 %% Forwards a tunnel data acknowledgment to the relay.
--spec tunnel_ack(Connection :: pid(), TunId :: non_neg_integer()) ->
-	ok | {error, Reason :: atom()}.
+-spec tunnel_allowance(Connection :: pid(), TunId :: non_neg_integer(),
+	Allowance :: pos_integer()) -> ok | {error, Reason :: atom()}.
 
-tunnel_ack(Connection, TunId) ->
-	gen_server:call(Connection, {tunnel_ack, TunId}, infinity).
+tunnel_allowance(Connection, TunId, Allowance) ->
+	gen_server:call(Connection, {tunnel_allowance, TunId, Allowance}, infinity).
 
 
 %% Forwards a tunnel close request to the relay.
@@ -329,7 +329,10 @@ handle_call({tunnel, Cluster, Timeout}, From, State = #state{sock = Sock}) ->
 	iris_logger:info(Logger, "constructing outbound tunnel",
 		[{cluster, Cluster}, {timeout, Timeout}]
 	),
-	true   = ets:insert_new(State#state.tunPend, {TunId, From, Logger}),
+	true = ets:insert_new(State#state.tunPend, {TunId, From, Logger}),
+
+	{ok, Tunnel} = iris_tunnel:start_link(TunId, Logger),
+	true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
 
 	% Send the request to the relay and finish with a pending reply
 	ok = iris_proto:send_tunnel_init(Sock, TunId, Cluster, Timeout),
@@ -339,9 +342,9 @@ handle_call({tunnel, Cluster, Timeout}, From, State = #state{sock = Sock}) ->
 handle_call({tunnel_send, TunId, SizeOrCont, Message}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:send_tunnel_transfer(Sock, TunId, SizeOrCont, Message), State};
 
-%% Relays a tunnel acknowledgment to the Iris node.
-handle_call({tunnel_ack, TunId}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:send_tunnel_ack(Sock, TunId), State};
+%% Relays a tunnel data allowance to the Iris node.
+handle_call({tunnel_allowance, TunId, Allowance}, _From, State = #state{sock = Sock}) ->
+	{reply, iris_proto:send_tunnel_allowance(Sock, TunId, Allowance), State};
 
 %% Forwards a tunnel closing request to the relay if not yet closed remotely and
 %% removes the tunnel from the local state.
@@ -392,22 +395,20 @@ handle_cast({handle_tunnel_init, BuildId, ChunkLimit}, State = #state{sock = Soc
 handle_cast({handle_tunnel_result, TunId, Result}, State) ->
 	% Fetch the result channel and remove from state
 	{TunId, From, Logger} = hd(ets:lookup(State#state.tunPend, TunId)),
+	{TunId, Tunnel}       = hd(ets:lookup(State#state.tunLive, TunId)),
 	ets:delete(State#state.tunPend, TunId),
 
 	% Reply to the pending process and return
 	Reply = case Result of
 		{ok, ChunkLimit} ->
 			iris_logger:info(Logger, "tunnel construction completed", [{chunk_limit, ChunkLimit}]),
-			case iris_tunnel:start_link(TunId, ChunkLimit, Logger) of
-				{ok, Tunnel} ->
-					% Save the live tunnel
-					true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
-					ok = iris_proto:send_tunnel_allowance(State#state.sock, TunId, iris_limits:default_tunnel_buffer()),
-					{ok, Tunnel};
-				Error -> Error
-			end;
+			ok = iris_tunnel:finalize(Tunnel, ChunkLimit),
+			ok = iris_proto:send_tunnel_allowance(State#state.sock, TunId, iris_limits:default_tunnel_buffer()),
+			{ok, Tunnel};
 		{error, Reason} ->
-			iris_logger:info(Logger, "tunnel construction failed", [{reason, Reason}]),
+			iris_logger:warn(Logger, "tunnel construction failed", [{reason, Reason}]),
+			true = ets:delete(State#state.tunLive, TunId),
+			ok = iris_tunnel:stop(Tunnel),
 			{error, Reason}
 	end,
 	gen_server:reply(From, Reply),
@@ -425,11 +426,6 @@ handle_info({'EXIT', ProcPid, Reason}, State) when ProcPid =:= State#state.procp
 	lists:foreach(fun({_ReqId, Pid}) ->
 		gen_server:reply(Pid, {error, terminating})
 	end, ets:tab2list(State#state.reqPend)),
-
-	% Notify all tunnels of the closure
-	lists:foreach(fun({_, Tunnel}) ->
-		Tunnel ! close
-	end, ets:tab2list(State#state.tunLive)),
 
 	% Terminate, notifying either the closer or the handler
 	case State#state.closer of
