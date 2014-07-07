@@ -324,13 +324,16 @@ handle_call({unsubscribe, Topic}, _From, State = #state{sock = Sock}) ->
 %% Relays a tunneling request to the Iris node, waiting async with for the reply.
 handle_call({tunnel, Cluster, Timeout}, From, State = #state{sock = Sock}) ->
 	% Create a result channel for the tunneling reply
-	TunId = State#state.tunIdx,
-	true = ets:insert_new(State#state.tunPend, {TunId, From}),
-	NewState = State#state{tunIdx = TunId+1},
+	TunId  = State#state.tunIdx,
+	Logger = iris_logger:new(State#state.logger, [{tunnel, TunId}]),
+	iris_logger:info(Logger, "constructing outbound tunnel",
+		[{cluster, Cluster}, {timeout, Timeout}]
+	),
+	true   = ets:insert_new(State#state.tunPend, {TunId, From, Logger}),
 
 	% Send the request to the relay and finish with a pending reply
 	ok = iris_proto:send_tunnel_init(Sock, TunId, Cluster, Timeout),
-	{noreply, NewState};
+	{noreply, State#state{tunIdx = TunId+1}};
 
 %% Relays a tunnel data packet to the Iris node.
 handle_call({tunnel_send, TunId, SizeOrCont, Message}, _From, State = #state{sock = Sock}) ->
@@ -368,16 +371,18 @@ handle_cast({reply, Id, Response}, State) ->
 %% tunnel with the given chunking limit and replies to the relay with the final
 %% permanent tunnel id.
 handle_cast({handle_tunnel_init, BuildId, ChunkLimit}, State = #state{sock = Sock}) ->
-	io:format(user, "tunnel init~n", []),
-
 	% Create the local tunnel endpoint
-	TunId = State#state.tunIdx,
-	{ok, Tunnel} = iris_tunnel:start_link(TunId, ChunkLimit),
+	TunId  = State#state.tunIdx,
+	Logger = iris_logger:new(State#state.logger, [{tunnel, TunId}]),
+	iris_logger:info(Logger, "accepting inbound tunnel", [{chunk_limit, ChunkLimit}]),
+
+	{ok, Tunnel} = iris_tunnel:start_link(TunId, ChunkLimit, Logger),
 	true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
 
 	% Acknowledge the tunnel creation to the relay
 	ok = iris_proto:send_tunnel_confirm(Sock, BuildId, TunId),
 	ok = iris_proto:send_tunnel_allowance(Sock, TunId, iris_limits:default_tunnel_buffer()),
+	iris_logger:info(Logger, "tunnel acceptance completed"),
 
 	% Notify the handler of the new tunnel
 	ok = iris_server:handle_tunnel(State#state.handler, Tunnel),
@@ -386,13 +391,14 @@ handle_cast({handle_tunnel_init, BuildId, ChunkLimit}, State = #state{sock = Soc
 % Delivers a reply to a pending tunneling request.
 handle_cast({handle_tunnel_result, TunId, Result}, State) ->
 	% Fetch the result channel and remove from state
-	{TunId, From} = hd(ets:lookup(State#state.tunPend, TunId)),
+	{TunId, From, Logger} = hd(ets:lookup(State#state.tunPend, TunId)),
 	ets:delete(State#state.tunPend, TunId),
 
 	% Reply to the pending process and return
 	Reply = case Result of
 		{ok, ChunkLimit} ->
-			case iris_tunnel:start_link(TunId, ChunkLimit) of
+			iris_logger:info(Logger, "tunnel construction completed", [{chunk_limit, ChunkLimit}]),
+			case iris_tunnel:start_link(TunId, ChunkLimit, Logger) of
 				{ok, Tunnel} ->
 					% Save the live tunnel
 					true = ets:insert_new(State#state.tunLive, {TunId, Tunnel}),
@@ -400,7 +406,9 @@ handle_cast({handle_tunnel_result, TunId, Result}, State) ->
 					{ok, Tunnel};
 				Error -> Error
 			end;
-		Error -> Error
+		{error, Reason} ->
+			iris_logger:info(Logger, "tunnel construction failed", [{reason, Reason}]),
+			{error, Reason}
 	end,
 	gen_server:reply(From, Reply),
 	{noreply, State};

@@ -9,7 +9,7 @@
 
 -module(iris_tunnel).
 -export([send/3, recv/2, close/1]).
--export([start_link/2, handle_allowance/2, handle_transfer/3, handle_close/2]).
+-export([start_link/3, handle_allowance/2, handle_transfer/3, handle_close/2]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
@@ -20,12 +20,20 @@
 %% External API functions
 %% =============================================================================
 
+-spec start_link(Id :: non_neg_integer(), ChunkLimit :: pos_integer(),
+	Logger :: iris_logger:logger()) -> {ok, Server :: pid()} | {error, Reason :: term()}.
+
+start_link(Id, ChunkLimit, Logger) ->
+	gen_server:start(?MODULE, {self(), Id, ChunkLimit, Logger}, []).
+
+
 %% Forwards the message to be sent to the tunnel process.
 -spec send(Tunnel :: pid(), Message :: binary(), Timeout :: timeout()) ->
 	ok | {error, Reason :: atom()}.
 
 send(Tunnel, Message, Timeout) ->
 	gen_server:call(Tunnel, {schedule_send, Message, Timeout}, infinity).
+
 
 %% Forwards the receive request to the tunnel process.
 -spec recv(Tunnel :: pid(), Timeout :: timeout()) ->
@@ -34,18 +42,13 @@ send(Tunnel, Message, Timeout) ->
 recv(Tunnel, Timeout) ->
 	gen_server:call(Tunnel, {recv, Timeout}, infinity).
 
+
 %% Forwards the close request to the tunnel.
 -spec close(Tunnel :: pid()) ->
 	ok | {error, Reason :: atom()}.
 
 close(Tunnel) ->
 	gen_server:call(Tunnel, close, infinity).
-
--spec start_link(Id :: non_neg_integer(), ChunkLimit :: pos_integer()) ->
-	{ok, Server :: pid()} | {error, Reason :: term()}.
-
-start_link(Id, ChunkLimit) ->
-	gen_server:start(?MODULE, {self(), Id, ChunkLimit}, []).
 
 
 %% =============================================================================
@@ -104,7 +107,8 @@ handle_close(Tunnel, Reason) ->
 
 	term,      %% Termination flag to prevent new sends
   closer,    %% Processes waiting for the close ack
-  stat       %% Failure reason, if any received
+  stat,      %% Failure reason, if any received
+  logger     %% Logger with connection and tunnel ids injected
 }).
 
 
@@ -113,7 +117,7 @@ handle_close(Tunnel, Reason) ->
 %% =============================================================================
 
 %% Initializes the tunnel with the two asymmetric buffers.
-init({Conn, Id, ChunkLimit}) ->
+init({Conn, Id, ChunkLimit, Logger}) ->
 	{ok, #state{
 		id         = Id,
 		conn       = Conn,
@@ -125,7 +129,8 @@ init({Conn, Id, ChunkLimit}) ->
 		atoiTasks  = [],
 		term       = false,
     closer     = nil,
-    stat       = ""
+    stat       = "",
+    logger     = Logger
 	}}.
 
 %% Forwards an outbound message to the remote endpoint of the conn. If the send
@@ -191,6 +196,7 @@ handle_call(close, From, State = #state{}) ->
 	case State#state.term of
     true  -> {stop, normal, State#state.stat, State};
 		false ->
+			iris_logger:info(State#state.logger, "closing tunnel"),
       ok = iris_conn:tunnel_close(State#state.conn, State#state.id),
       {noreply, State#state{closer = From}}
 	end.
@@ -225,8 +231,12 @@ handle_cast({handle_allowance, Space}, State = #state{atoiSpace = Allowance}) ->
 %% Handles the graceful remote closure of the tunnel.
 handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->
   Status = case Reason of
-    [] -> ok;
-    _  -> {error, Reason}
+    [] ->
+    	iris_logger:info(State#state.logger, "tunnel closed gracefully"),
+    	ok;
+    _  ->
+    	iris_logger:info(State#state.logger, "tunnel dropped", [{reason, Reason}]),
+    	{error, Reason}
   end,
 
   % Notify all pending receives of the closure
@@ -255,7 +265,6 @@ handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->
   ok = iris_conn:handle_tunnel_close(Conn, Id),
 
   % Notify the closer (if any) of the termination
-  io:format(user, "tunnel closing ~p ~p~n", [State#state.id, Status]),
   case State#state.closer of
     nil  -> {noreply, State#state{itoaTasks = [], term = true, stat = Status}};
     From ->

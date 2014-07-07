@@ -19,7 +19,7 @@
 %% =============================================================================
 
 %% Tests multiple concurrent client and service tunnels.
-tunnel_tes() ->
+tunnel_test() ->
   % Test specific configurations
   ConfClients   = 7,
   ConfServers   = 7,
@@ -39,7 +39,6 @@ tunnel_tes() ->
         % Execute the tunnel construction, message exchange and verification
         Id = io_lib:format("client #~p", [Client]),
         ok = build_exchange_verify(Id, Conn, ConfTunnels, ConfExchanges),
-        io:format(user, "clit ~p done~n", [Client]),
         iris_barrier:sync(Barrier),
 
         % Disconnect from the local relay
@@ -65,7 +64,6 @@ tunnel_tes() ->
         % Execute the tunnel construction, message exchange and verification
         Id = io_lib:format("server #~p", [Service]),
         ok = build_exchange_verify(Id, Conn, ConfTunnels, ConfExchanges),
-        io:format(user, "server ~p done~n", [Service]),
         iris_barrier:sync(Barrier),
 
         % Unregister the service
@@ -88,9 +86,7 @@ build_exchange_verify(Id, Conn, Tunnels, Exchanges) ->
   lists:foreach(fun(Tunnel) ->
 	  spawn(fun() ->
 	  	% Open a tunnel to the service cluster
-      io:format(user, "opening tunnel~n", []),
 	  	{ok, Tun} = iris_client:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
-      io:format(user, "tunnel opened~n", []),
 
 	  	% Tear down the tunnel
       timer:sleep(1000),
@@ -119,7 +115,6 @@ handle_tunnel(Tunnel, State) ->
 	{noreply, State}.
 
 echoer(Tunnel) ->
-  io:format(user, "tunnel inbound~n", []),
 	%case iris:recv(Tunnel, infinity) of
 %		{ok, Message} ->
 %			ok = iris:send(Tunnel, Message, infinity),
