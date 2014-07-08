@@ -5,8 +5,6 @@
 %% cloud messaging framework, and as such, the same licensing terms apply.
 %% For details please see http://iris.karalabe.com/downloads#License
 
-%% @private
-
 -module(iris_tunnel).
 -export([send/3, recv/2, close/1]).
 -export([start_link/2, start_link/3, finalize/2, handle_allowance/2,
@@ -49,6 +47,7 @@ close(Tunnel) ->
 %% Internal API functions
 %% =============================================================================
 
+%% @private
 -spec start_link(Id :: non_neg_integer(), Logger :: iris_logger:logger())
 	-> {ok, Server :: pid()} | {error, Reason :: term()}.
 
@@ -56,6 +55,7 @@ start_link(Id, Logger) ->
 	gen_server:start_link(?MODULE, {self(), Id, 0, Logger}, []).
 
 
+%% @private
 -spec start_link(Id :: non_neg_integer(), ChunkLimit :: pos_integer(),
 	Logger :: iris_logger:logger()) -> {ok, Server :: pid()} | {error, Reason :: term()}.
 
@@ -63,6 +63,7 @@ start_link(Id, ChunkLimit, Logger) ->
 	gen_server:start_link(?MODULE, {self(), Id, ChunkLimit, Logger}, []).
 
 
+%% @private
 -spec finalize(Tunnel :: pid(), Result :: {ok, ChunkLimit :: pos_integer()} |
 	{error, Reason :: term()}) -> ok.
 
@@ -70,12 +71,14 @@ finalize(Tunnel, Result) ->
 	gen_server:call(Tunnel, {finalize, Result}).
 
 
+%% @private
 -spec potentially_send() -> ok.
 
 potentially_send() ->
  	gen_server:cast(self(), potentially_send).
 
 
+%% @private
 -spec potentially_recv() -> ok.
 
 potentially_recv() ->
@@ -141,6 +144,7 @@ handle_close(Tunnel, Reason) ->
 %% Generic server callback methods
 %% =============================================================================
 
+%% @private
 %% Initializes the tunnel with the two asymmetric buffers.
 init({Conn, Id, ChunkLimit, Logger}) ->
 	{ok, #state{
@@ -161,6 +165,7 @@ init({Conn, Id, ChunkLimit, Logger}) ->
 	}}.
 
 
+%% @private
 handle_call({finalize, {ok, ChunkLimit}}, _From, State) ->
 	{reply, ok, State#state{chunkLimit = ChunkLimit}};
 
@@ -217,6 +222,7 @@ handle_call(close, From, State = #state{}) ->
       {noreply, State#state{closer = From}}
 	end.
 
+%% @private
 %% If there is enough allowance and data schedules, sends a chunk to the relay.
 handle_cast(potentially_send, State = #state{atoiPend = nil}) ->
 	{noreply, State};
@@ -360,6 +366,7 @@ handle_cast({handle_close, Reason}, State = #state{conn = Conn, id = Id}) ->
   end.
 
 
+%% @private
 %% Notifies the pending send of failure due to timeout. In the rare case of the
 %% timeout happening right before the timer is canceled, the event is dropped.
 handle_info(send_timeout, State = #state{atoiPend = Task}) ->
@@ -378,6 +385,7 @@ handle_info(recv_timeout, State = #state{itoaPend = Task}) ->
 	end,
 	{noreply, State#state{itoaPend = nil}}.
 
+%% @private
 %% Cleanup method, does nothing really.
 terminate(_Reason, _State) -> ok.
 
@@ -386,5 +394,6 @@ terminate(_Reason, _State) -> ok.
 %% Unused generic server methods
 %% =============================================================================
 
+%% @private
 code_change(_OldVsn, _State, _Extra) ->
 	{error, unimplemented}.
