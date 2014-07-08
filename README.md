@@ -107,24 +107,24 @@ An expanded summary of the supported messaging schemes can be found in the [core
 
 ### Error handling
 
-The binding uses the idiomatic Erlang error handling mechanisms of returning `{error, Reason}` tuples whenever a failure occurs. However, there are a few common cases that need to be individually checkable, hence a few special errors values and types have been introduced.
+The binding uses the idiomatic Erlang error handling mechanisms of returning `{error, Reason}` tuples when a failure occurs. However, there are a few common cases that need to be individually checkable, hence a few special errors values and types have been introduced.
 
-Many operations - such as requests and tunnels - can time out. To allow checking for this particular failure, Iris returns `{error, timeout}` in such scenarios. Similarly, connections, services and tunnels may fail, in the case of which all pending operations terminate with `{error, closed}.
+Many operations - such as requests and tunnels - can time out. To allow checking for this particular failure, Iris returns `{error, timeout}` in such scenarios. Similarly, connections, services and tunnels may fail, in the case of which all pending operations terminate with `{error, closed}`.
 
 Additionally, the requests/reply pattern supports sending back an error instead of a reply to the caller. To enable the originating node to check whether a request failed locally or remotely, all remote errors reasons are wrapped in an `{remote, Reason}` tuple.
 
 ```erlang
 case iris_client:request(Conn, "cluster", Request, Timeout) of
 	{ok, Reply} ->
-    // Request completed successfully
+    % Request completed successfully
   {error, timeout} ->
-    // Request timed out
+    % Request timed out
   {error, closed} ->
-    // Connection terminated
+    % Connection terminated
   {error, {remote, Reason}} ->
-    // Request failed remotely
+    % Request failed remotely
   {error, Reason} ->
-    // Requesting failed locally
+    % Requesting failed locally
 end
 ```
 
