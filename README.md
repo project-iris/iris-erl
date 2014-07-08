@@ -51,7 +51,41 @@ Since it generates random credentials, a developer node will not be able to conn
 
 After successfully booting, the relay opens a _local_ TCP endpoint (port `55555` by default, configurable using `-port`) through which arbitrarily many entities may attach. Each connecting entity may also decide whether it becomes a simple _client_ only consuming the services provided by other participants, or a full fledged _service_, also making functionality available to others for consumption.
 
-To be finished...
+Connecting as a client can be done trivially by `iris_client:start/1` or `iris_client:start_link/1` with the port number of the local relay's client endpoint. After the attachment is completed, a connection `pid` is returned through which messaging can begin. A client cannot accept inbound requests, broadcasts and tunnels, only initiate them.
+
+```erlang
+% Connect to the local relay
+{ok, Conn} = iris_client:start(55555),
+
+% Disconnect from the local relay
+ok = iris_client:stop(Conn)
+```
+
+To provide functionality for consumption, an entity needs to register as a service. This is slightly more involved, as beside initiating a registration request, it also needs to specify a callback handler to process inbound events. First, the callback handler needs to implement the `iris_server` behavior. After writing the handler, registration can commence by invoking `iris_server:start/4,/5` or `iris_server:start_link/4,/5` with the port number of the local relay's client endpoint; sub-service cluster this entity will join as a member; callback module to process inbound messages, initialization arguments for it and an optional resource cap.
+
+```
+-behaviour(iris_server).
+-export([init/2, handle_broadcast/2, handle_request/3, handle_tunnel/2,
+	handle_drop/2, terminate/2]).
+
+% Implement all the methods defined by iris_server.
+init(Conn, Args)         -> {ok, State}.
+terminate(Reason, State) ->	ok.
+
+handle_broadcast(Message, State)     -> {noreply, NewState}.
+handle_request(Request, From, State) -> {reply, Reply, NewState}.
+handle_tunnel(Tunnel, State)         -> {noreply, NewState}.
+handle_drop(Reason, State)           -> {stop, Reason, NewState}.
+
+main() ->
+	% Register a new service to the relay
+	{ok, Server} = iris_server:start(55555, "echo", ?MODULE, InitArgs),
+
+	% Unregister the service
+	ok = iris_server:stop(Server).
+```
+
+Upon successful registration, Iris invokes the callback module's `init/2` method with the live Connection `pid` - the service's client connection - through which the service itself can initiate outbound requests, as well as the user supplied initialization arguments. `init/2` is called only once and before any other handler method is invoked.
 
 ### Messaging through Iris
 
