@@ -69,17 +69,17 @@ To provide functionality for consumption, an entity needs to register as a servi
 	handle_drop/2, terminate/2]).
 
 % Implement all the methods defined by iris_server.
-init(Conn, Args)         -> {ok, State}.
-terminate(Reason, State) ->	ok.
+init(Conn, your_init_args) -> {ok, your_state}.
+terminate(Reason, State)   -> ok.
 
-handle_broadcast(Message, State)     -> {noreply, NewState}.
-handle_request(Request, From, State) -> {reply, Reply, NewState}.
-handle_tunnel(Tunnel, State)         -> {noreply, NewState}.
-handle_drop(Reason, State)           -> {stop, Reason, NewState}.
+handle_broadcast(Message, State)     -> {noreply, State}.
+handle_request(Request, From, State) -> {reply, Request, State}.
+handle_tunnel(Tunnel, State)         -> {noreply, State}.
+handle_drop(Reason, State)           -> {stop, Reason, State}.
 
 main() ->
 	% Register a new service to the relay
-	{ok, Server} = iris_server:start(55555, "echo", ?MODULE, InitArgs),
+	{ok, Server} = iris_server:start(55555, "echo", ?MODULE, your_init_args),
 
 	% Unregister the service
 	ok = iris_server:stop(Server).
@@ -96,7 +96,11 @@ Iris supports four messaging schemes: request/reply, broadcast, tunnel and publi
 Presenting each primitive is out of scope, but for illustrative purposes the request/reply was included. Given the echo service registered above, we can send it requests and wait for replies through any client connection. Iris will automatically locate, route and load balanced between all services registered under the addressed name.
 
 ```erlang
-% To be finished...
+Request = <<"some request binary">>,
+case iris_client:request(Conn, "echo", Request, 1000) of
+	{ok, Reply}     -> io:format("Reply arrived: ~p.~n", [Reply]);
+	{error, Reason} -> io:format("Failed to execute request: ~p.~n", [Reason])
+end
 ```
 
 An expanded summary of the supported messaging schemes can be found in the [core concepts](http://iris.karalabe.com/book/core_concepts) section of [the book of Iris](http://iris.karalabe.com/book). A detailed presentation and analysis of each individual primitive will be added soon.
