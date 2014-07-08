@@ -111,26 +111,41 @@ The binding uses the idiomatic Erlang error handling mechanisms of returning `{e
 
 Many operations - such as requests and tunnels - can time out. To allow checking for this particular failure, Iris returns `{error, timeout}` in such scenarios. Similarly, connections, services and tunnels may fail, in the case of which all pending operations terminate with `{error, closed}`.
 
-Additionally, the requests/reply pattern supports sending back an error instead of a reply to the caller. To enable the originating node to check whether a request failed locally or remotely, all remote errors reasons are wrapped in an `{remote, Reason}` tuple.
+Additionally, the requests/reply pattern supports sending back an error instead of a reply to the caller. To enable the originating node to check whether a request failed locally or remotely, all remote error reasons are wrapped in an `{remote, Reason}` tuple.
 
 ```erlang
 case iris_client:request(Conn, "cluster", Request, Timeout) of
 	{ok, Reply} ->
-    % Request completed successfully
-  {error, timeout} ->
-    % Request timed out
-  {error, closed} ->
-    % Connection terminated
-  {error, {remote, Reason}} ->
-    % Request failed remotely
-  {error, Reason} ->
-    % Requesting failed locally
+		% Request completed successfully
+	{error, timeout} ->
+		% Request timed out
+	{error, closed} ->
+		% Connection terminated
+	{error, {remote, Reason}} ->
+		% Request failed remotely
+	{error, Reason} ->
+		% Requesting failed locally
 end
 ```
 
 ### Resource capping
 
-To be finished...
+To prevent the network from overwhelming an attached process, the binding places memory limits on the broadcasts/requests inbound to a registered service as well as on the events received by a topic subscription. The memory limit defines the maximal length of the pending queue.
+
+The default values - listed below - can be overridden during service registration via `{broadcast_memory, Limit}`, `{request_memory, Limit}` and during topic subscription via `{event_memory, Limit}` passed as options. Any unset options will default to the preset ones.
+
+```erlang
+%% Memory allowance for pending broadcasts.
+default_broadcast_memory() -> 64 * 1024 * 1024.
+
+%% Memory allowance for pending requests.
+default_request_memory() -> 64 * 1024 * 1024.
+
+%% Memory allowance for pending events.
+default_topic_memory() -> 64 * 1024 * 1024.
+```
+
+There is also a sanity limit on the input buffer of a tunnel, but it is not exposed through the API as tunnels are meant as structural primitives, not sensitive to load. This may change in the future.
 
 ### Logging
 
