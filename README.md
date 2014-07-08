@@ -61,9 +61,9 @@ Connecting as a client can be done trivially by `iris_client:start/1` or `iris_c
 ok = iris_client:stop(Conn)
 ```
 
-To provide functionality for consumption, an entity needs to register as a service. This is slightly more involved, as beside initiating a registration request, it also needs to specify a callback handler to process inbound events. First, the callback handler needs to implement the `iris_server` behavior. After writing the handler, registration can commence by invoking `iris_server:start/4,/5` or `iris_server:start_link/4,/5` with the port number of the local relay's client endpoint; sub-service cluster this entity will join as a member; callback module to process inbound messages, initialization arguments for it and an optional resource cap.
+To provide functionality for consumption, an entity needs to register as a service. This is slightly more involved, as beside initiating a registration request, it also needs to specify a callback handler to process inbound events. First, the callback handler needs to implement the `iris_server` behavior. After writing the handler, registration can commence by invoking `iris_server:start/4,/5` or `iris_server:start_link/4,/5` with the port number of the local relay's client endpoint; sub-service cluster this entity will join as a member; callback module to process inbound messages; initialization arguments for the callback module and optional resource caps.
 
-```
+```erlang
 -behaviour(iris_server).
 -export([init/2, handle_broadcast/2, handle_request/3, handle_tunnel/2,
 	handle_drop/2, terminate/2]).
@@ -85,7 +85,7 @@ main() ->
 	ok = iris_server:stop(Server).
 ```
 
-Upon successful registration, Iris invokes the callback module's `init/2` method with the live Connection `pid` - the service's client connection - through which the service itself can initiate outbound requests, as well as the user supplied initialization arguments. `init/2` is called only once and before any other handler method is invoked.
+Upon successful registration, Iris invokes the callback module's `init/2` method with the live connection `pid` - the service's client connection - through which the service itself can initiate outbound requests, and the user supplied initialization arguments. The `init/2` is called only once and before any other handler method.
 
 ### Messaging through Iris
 
