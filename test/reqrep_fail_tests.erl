@@ -29,7 +29,7 @@ request_fail_test() ->
   lists:foreach(fun(Index) ->
     Request = lists:flatten(io_lib:format("failure ~p", [Index])),
     Binary  = list_to_binary(Request),
-    {error, Request} = iris_client:request(Conn, ?CONFIG_CLUSTER, Binary, 1000)
+    {error, {remote, Request}} = iris_client:request(Conn, ?CONFIG_CLUSTER, Binary, 1000)
   end, lists:seq(1, ConfRequests)),
 
   % Unregister the service

@@ -281,7 +281,7 @@ proc_reply(Socket, Owner) ->
 					ok = iris_conn:handle_reply(Owner, Id, {ok, Reply});
 				false ->
 					{ok, Fault} = recv_string(Socket),
-					ok = iris_conn:handle_reply(Owner, Id, {error, Fault})
+					ok = iris_conn:handle_reply(Owner, Id, {error, {remote, Fault}})
 			end
 	end,
 	ok.

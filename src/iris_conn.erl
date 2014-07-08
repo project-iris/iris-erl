@@ -154,7 +154,7 @@ tunnel_close(Connection, TunId) ->
 	{ok, Reply :: binary()} | {error, Reason :: term()}) -> ok.
 
 handle_reply(Connection, Id, Response) ->
-	gen_server:cast(Connection, {reply, Id, Response}).
+	gen_server:cast(Connection, {handle_reply, Id, Response}).
 
 
 -spec handle_tunnel_init(Connection :: pid(), Id :: non_neg_integer(),
@@ -352,7 +352,7 @@ handle_call({tunnel_close, TunId}, _From, State = #state{sock = Sock}) ->
 	{reply, iris_proto:send_tunnel_close(Sock, TunId), State}.
 
 %% Delivers a reply to a pending request.
-handle_cast({reply, Id, Response}, State) ->
+handle_cast({handle_reply, Id, Response}, State) ->
 	% Fetch the result channel and remove from state
 	{Id, Pending} = hd(ets:lookup(State#state.reqPend, Id)),
 	ets:delete(State#state.reqPend, Id),
