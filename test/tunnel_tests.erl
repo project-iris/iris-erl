@@ -147,6 +147,9 @@ tunnel_chunking_test() ->
   ok         = iris_tunnel:send(Tunnel, Blob, 10000),
   {ok, Blob} = iris_tunnel:recv(Tunnel, 10000),
 
+	% Tear down the tunnel
+	ok = iris_tunnel:close(Tunnel),
+
   % Unregister the service
   ok = iris_server:stop(Server).
 
@@ -178,6 +181,63 @@ tunnel_overload_test() ->
 		ok         = iris_tunnel:send(Tunnel, Data, 1000),
 		{ok, Data} = iris_tunnel:recv(Tunnel, 1000)
   end, lists:seq(1, 10)),
+
+	% Tear down the tunnel
+	ok = iris_tunnel:close(Tunnel),
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
+
+%% Benchmarks the latency of a single tunnel send (actually two way, so halves it).
+tunnel_latency_benchmark_test() ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Construct the tunnel
+  {ok, Tunnel} = iris_conn:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
+
+  % Measure the latency
+	benchmark:iterated(?FUNCTION, 5000, fun() ->
+		ok      = iris_tunnel:send(Tunnel, <<0:8>>, 1000),
+		{ok, _} = iris_tunnel:recv(Tunnel, 1000),
+		ok
+ 	end, 0.5),
+
+	% Tear down the tunnel
+	ok = iris_tunnel:close(Tunnel),
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
+
+%% Benchmarks the throughput of a single tunnel send (actually two way, so halves it).
+tunnel_throughput_benchmark_test() ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Construct the tunnel
+  {ok, Tunnel} = iris_conn:tunnel(Conn, ?CONFIG_CLUSTER, 1000),
+
+  % Measure the throughput
+  Map = fun() ->
+  	ok = iris_tunnel:send(Tunnel, <<0:8>>, 1000)
+  end,
+  Reduce = fun() ->
+		{ok, _} = iris_tunnel:recv(Tunnel, 1000),
+		ok
+	end,
+
+	benchmark:threaded(?FUNCTION, 1, 5000, Map, Reduce, 0.5),
+
+	% Tear down the tunnel
+	ok = iris_tunnel:close(Tunnel),
 
   % Unregister the service
   ok = iris_server:stop(Server).

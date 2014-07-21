@@ -6,23 +6,29 @@
 %% For details please see http://iris.karalabe.com/downloads#License
 
 -module(benchmark).
--export([iterated/3, threaded/5]).
+-export([iterated/3, iterated/4, threaded/5, threaded/6]).
 
 
 % Runs an iterated benchmark, each function call finishing before the next.
 iterated(Name, Iters, Func) ->
+	iterated(Name, Iters, Func, 1).
+
+iterated(Name, Iters, Func, Multi) ->
 	io:format(user, "~s   ", [atom_to_list(Name)]),
 
 	Start = erlang:now(),
 	ok    = run(Iters, Func),
 	Diff  = timer:now_diff(erlang:now(), Start),
 
-	io:format(user, "~B ops   ~p ns/op~n", [Iters, Diff * 1000 / Iters]).
+	io:format(user, "~B ops   ~p ns/op~n", [Iters, Diff * 1000 / Iters * Multi]).
 
 
 % Runs a concurrent benchmark, with parallel worker threads and a single
 % result collector.
 threaded(Name, Threads, Iters, Map, Reduce) ->
+	threaded(Name, Threads, Iters, Map, Reduce, 1).
+
+threaded(Name, Threads, Iters, Map, Reduce, Multi) ->
 	io:format(user, "~s_~B_threads   ", [atom_to_list(Name), Threads]),
 	Start = erlang:now(),
 
@@ -51,7 +57,7 @@ threaded(Name, Threads, Iters, Map, Reduce) ->
 	end, lists:seq(1, Threads)),
 
 	Diff = timer:now_diff(erlang:now(), Start),
-	io:format(user, "~B ops   ~p ns/op~n", [Iters, Diff * 1000 / Iters]).
+	io:format(user, "~B ops   ~p ns/op~n", [Iters, Diff * 1000 / Iters * Multi]).
 
 
 % Simple iterator to repeat a function call N times.
