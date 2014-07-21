@@ -160,7 +160,7 @@ broadcast_latency_benchmark_test() ->
 	  ok = receive
 	    _ -> ok
 	  after
-	    10 -> timeout
+	    100 -> timeout
 	  end
  	end),
 
@@ -169,14 +169,14 @@ broadcast_latency_benchmark_test() ->
 
 
 %% Benchmarks broadcasting a batch of messages.
-broadcast_throughput_1_thread_benchmark_test()   -> ok = broadcast_throughput_benchmark(1, 50000).
-broadcast_throughput_2_thread_benchmark_test()   -> ok = broadcast_throughput_benchmark(2, 50000).
-broadcast_throughput_4_thread_benchmark_test()   -> ok = broadcast_throughput_benchmark(4, 50000).
-broadcast_throughput_8_thread_benchmark_test()   -> ok = broadcast_throughput_benchmark(8, 50000).
-broadcast_throughput_16_thread_benchmark_test()  -> ok = broadcast_throughput_benchmark(16, 50000).
-broadcast_throughput_32_thread_benchmark_test()  -> ok = broadcast_throughput_benchmark(32, 50000).
-broadcast_throughput_64_thread_benchmark_test()  -> ok = broadcast_throughput_benchmark(64, 50000).
-broadcast_throughput_128_thread_benchmark_test() -> ok = broadcast_throughput_benchmark(128, 50000).
+broadcast_throughput_1_threads_benchmark_test()   -> ok = broadcast_throughput_benchmark(1, 50000).
+broadcast_throughput_2_threads_benchmark_test()   -> ok = broadcast_throughput_benchmark(2, 50000).
+broadcast_throughput_4_threads_benchmark_test()   -> ok = broadcast_throughput_benchmark(4, 50000).
+broadcast_throughput_8_threads_benchmark_test()   -> ok = broadcast_throughput_benchmark(8, 50000).
+broadcast_throughput_16_threads_benchmark_test()  -> ok = broadcast_throughput_benchmark(16, 50000).
+broadcast_throughput_32_threads_benchmark_test()  -> ok = broadcast_throughput_benchmark(32, 50000).
+broadcast_throughput_64_threads_benchmark_test()  -> ok = broadcast_throughput_benchmark(64, 50000).
+broadcast_throughput_128_threads_benchmark_test() -> ok = broadcast_throughput_benchmark(128, 50000).
 
 
 broadcast_throughput_benchmark(Threads, Messages) ->
