@@ -102,6 +102,54 @@ request_memory_limit_test() ->
   ok = iris_server:stop(Server).
 
 
+%% Benchmarks executing a single request.
+request_latency_benchmark_test() ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Benchmark the request latency
+  benchmark:iterated(?FUNCTION, 5000, fun() ->
+	  {ok, _} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, 1000),
+	  ok
+ 	end),
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
+%% Benchmarks a batch of request operations.
+request_throughput_1_threads_benchmark_test()   -> ok = request_throughput_benchmark(1, 10000).
+request_throughput_2_threads_benchmark_test()   -> ok = request_throughput_benchmark(2, 10000).
+request_throughput_4_threads_benchmark_test()   -> ok = request_throughput_benchmark(4, 10000).
+request_throughput_8_threads_benchmark_test()   -> ok = request_throughput_benchmark(8, 10000).
+request_throughput_16_threads_benchmark_test()  -> ok = request_throughput_benchmark(16, 10000).
+request_throughput_32_threads_benchmark_test()  -> ok = request_throughput_benchmark(32, 10000).
+request_throughput_64_threads_benchmark_test()  -> ok = request_throughput_benchmark(64, 10000).
+request_throughput_128_threads_benchmark_test() -> ok = request_throughput_benchmark(128, 10000).
+
+
+request_throughput_benchmark(Threads, Messages) ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Create the map and reduce functions
+  Map = fun() ->
+	  {ok, _} = iris_client:request(Conn, ?CONFIG_CLUSTER, <<0:8>>, 1000),
+	  ok
+	end,
+	Reduce = fun() -> ok end,
+
+  benchmark:threaded(?FUNCTION, Threads, Messages, Map, Reduce),
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
+
 %% =============================================================================
 %% Iris server callback methods
 %% =============================================================================

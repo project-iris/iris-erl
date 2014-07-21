@@ -27,6 +27,7 @@ threaded(Name, Threads, Iters, Map, Reduce) ->
 	Start = erlang:now(),
 
 	% Spawn the mapping threads
+	Parent = self(),
 	lists:foreach(fun(Index) ->
 		% Calculate the iterations alloted to this thread
 		Batch = Iters / Threads,
@@ -35,13 +36,21 @@ threaded(Name, Threads, Iters, Map, Reduce) ->
 			_       -> trunc(Index * Batch) - trunc((Index - 1) * Batch)
 		end,
 
-		spawn(fun() -> run(Count, Map) end)
+		spawn(fun() ->
+			run(Count, Map),
+			Parent ! done
+		end)
 	end, lists:seq(1, Threads)),
 
-	% Run the reducer and wait for it
-	ok   = run(Iters, Reduce),
-	Diff = timer:now_diff(erlang:now(), Start),
+	% Run the reducer and wait for it and all children
+	ok = run(Iters, Reduce),
+	lists:foreach(fun(_) ->
+		receive
+			_ -> ok
+		end
+	end, lists:seq(1, Threads)),
 
+	Diff = timer:now_diff(erlang:now(), Start),
 	io:format(user, "~B ops   ~p ns/op~n", [Iters, Diff * 1000 / Iters]).
 
 
