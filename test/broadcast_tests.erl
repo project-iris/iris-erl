@@ -146,6 +146,64 @@ broadcast_memory_limit_test() ->
   ok = iris_server:stop(Server).
 
 
+%% Benchmarks broadcasting a single message.
+broadcast_latency_benchmark_test() ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Benchmark the message transfer latency
+  benchmark:iterated(?FUNCTION, 10000, fun() ->
+	  ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, <<0:8>>),
+	  ok = receive
+	    _ -> ok
+	  after
+	    10 -> timeout
+	  end
+ 	end),
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
+
+%% Benchmarks broadcasting a batch of messages.
+broadcast_throughput_1_thread_benchmark_test()   -> ok = broadcast_throughput_benchmark(1, 20000).
+broadcast_throughput_2_thread_benchmark_test()   -> ok = broadcast_throughput_benchmark(2, 20000).
+broadcast_throughput_4_thread_benchmark_test()   -> ok = broadcast_throughput_benchmark(4, 20000).
+broadcast_throughput_8_thread_benchmark_test()   -> ok = broadcast_throughput_benchmark(8, 20000).
+broadcast_throughput_16_thread_benchmark_test()  -> ok = broadcast_throughput_benchmark(16, 20000).
+broadcast_throughput_32_thread_benchmark_test()  -> ok = broadcast_throughput_benchmark(32, 20000).
+broadcast_throughput_64_thread_benchmark_test()  -> ok = broadcast_throughput_benchmark(64, 20000).
+broadcast_throughput_128_thread_benchmark_test() -> ok = broadcast_throughput_benchmark(128, 20000).
+
+
+broadcast_throughput_benchmark(Threads, Messages) ->
+  % Register a new service to the relay
+  {ok, Server} = iris_server:start(?CONFIG_RELAY, ?CONFIG_CLUSTER, ?MODULE, self()),
+  Conn = receive
+    {ok, Client} -> Client
+  end,
+
+  % Create the map and reduce functions
+  Map = fun() ->
+	  ok = iris_client:broadcast(Conn, ?CONFIG_CLUSTER, <<0:8>>)
+	end,
+	Reduce = fun() ->
+		receive
+	    _ -> ok
+	  after
+	    100 -> timeout
+	  end
+	end,
+
+  benchmark:threaded(?FUNCTION, Threads, Messages, Map, Reduce),
+
+  % Unregister the service
+  ok = iris_server:stop(Server).
+
+
 %% =============================================================================
 %% Iris server callback methods
 %% =============================================================================
