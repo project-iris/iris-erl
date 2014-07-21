@@ -29,9 +29,11 @@ threaded(Name, Threads, Iters, Map, Reduce) ->
 	% Spawn the mapping threads
 	lists:foreach(fun(Index) ->
 		% Calculate the iterations alloted to this thread
-		Batch = Iters div Index,
-		Limit = erlang:min(Iters, Index * Batch),
-		Count = Limit - (Index - 1) * Batch,
+		Batch = Iters / Threads,
+		Count = case Index of
+			Threads -> Iters - trunc((Index - 1) * Batch);
+			_       -> trunc(Index * Batch) - trunc((Index - 1) * Batch)
+		end,
 
 		spawn(fun() -> run(Count, Map) end)
 	end, lists:seq(1, Threads)),
