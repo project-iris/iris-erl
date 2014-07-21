@@ -38,7 +38,7 @@ publish_test() ->
 
 				% Subscribe to the batch of topics
 				lists:foreach(fun(Topic) ->
-					ok = iris_client:subscribe(Conn, Topic, pubsub_handler, {self(), Topic}, [])
+					ok = iris_client:subscribe(Conn, Topic, pubsub_handler, {self(), Topic})
 				end, Topics),
 				timer:sleep(100),
 				iris_barrier:sync(Barrier),
@@ -84,7 +84,7 @@ publish_test() ->
 
 				% Subscribe to the batch of topics
 				lists:foreach(fun(Topic) ->
-					ok = iris_client:subscribe(Conn, Topic, pubsub_handler, {self(), Topic}, [])
+					ok = iris_client:subscribe(Conn, Topic, pubsub_handler, {self(), Topic})
 				end, Topics),
 				timer:sleep(100),
 				iris_barrier:sync(Barrier),
@@ -191,6 +191,72 @@ publish_memory_limit_test() ->
   after
     1 -> timeout
   end,
+
+  % Unsubscribe from the topic
+  ok = iris_client:unsubscribe(Conn, ?CONFIG_TOPIC),
+
+	% Disconnect from the local relay
+	ok = iris_client:stop(Conn).
+
+
+%% Benchmarks publishing a single message.
+publish_latency_benchmark_test() ->
+  % Connect to the relay
+	{ok, Conn} = iris_client:start(?CONFIG_RELAY),
+
+	% Subscribe to a topic and wait for state propagation
+  ok = iris_client:subscribe(Conn, ?CONFIG_TOPIC, pubsub_handler, {self(), ?CONFIG_TOPIC}),
+  timer:sleep(100),
+
+  % Benchmark the event transfer latency
+  benchmark:iterated(?FUNCTION, 10000, fun() ->
+	  ok = iris_client:publish(Conn, ?CONFIG_TOPIC, <<0:8>>),
+	  ok = receive
+	    _ -> ok
+	  after
+	    100 -> timeout
+	  end
+ 	end),
+
+  % Unsubscribe from the topic
+  ok = iris_client:unsubscribe(Conn, ?CONFIG_TOPIC),
+
+	% Disconnect from the local relay
+	ok = iris_client:stop(Conn).
+
+
+%% Benchmarks publishing a batch of messages.
+publish_throughput_1_threads_benchmark_test()   -> ok = publish_throughput_benchmark(1, 50000).
+publish_throughput_2_threads_benchmark_test()   -> ok = publish_throughput_benchmark(2, 50000).
+publish_throughput_4_threads_benchmark_test()   -> ok = publish_throughput_benchmark(4, 50000).
+publish_throughput_8_threads_benchmark_test()   -> ok = publish_throughput_benchmark(8, 50000).
+publish_throughput_16_threads_benchmark_test()  -> ok = publish_throughput_benchmark(16, 50000).
+publish_throughput_32_threads_benchmark_test()  -> ok = publish_throughput_benchmark(32, 50000).
+publish_throughput_64_threads_benchmark_test()  -> ok = publish_throughput_benchmark(64, 50000).
+publish_throughput_128_threads_benchmark_test() -> ok = publish_throughput_benchmark(128, 50000).
+
+
+publish_throughput_benchmark(Threads, Messages) ->
+  % Connect to the relay
+	{ok, Conn} = iris_client:start(?CONFIG_RELAY),
+
+	% Subscribe to a topic and wait for state propagation
+  ok = iris_client:subscribe(Conn, ?CONFIG_TOPIC, pubsub_handler, {self(), ?CONFIG_TOPIC}),
+  timer:sleep(100),
+
+  % Create the map and reduce functions
+  Map = fun() ->
+	  ok = iris_client:publish(Conn, ?CONFIG_TOPIC, <<0:8>>)
+	end,
+	Reduce = fun() ->
+		receive
+	    _ -> ok
+	  after
+	    1000 -> timeout
+	  end
+	end,
+
+  benchmark:threaded(?FUNCTION, Threads, Messages, Map, Reduce),
 
   % Unsubscribe from the topic
   ok = iris_client:unsubscribe(Conn, ?CONFIG_TOPIC),

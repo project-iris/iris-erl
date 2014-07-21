@@ -7,7 +7,8 @@
 
 -module(iris_client).
 -export([start/1, start_link/1, stop/1]).
--export([broadcast/3, request/4, subscribe/5, publish/3, unsubscribe/2, tunnel/3]).
+-export([broadcast/3, request/4, subscribe/4, subscribe/5, publish/3,
+	unsubscribe/2, tunnel/3]).
 
 
 %% @doc Connects to the Iris network as a simple client.
@@ -103,6 +104,25 @@ broadcast(Client, Cluster, Message) ->
 
 request(Client, Cluster, Request, Timeout) ->
   iris_conn:request(Client, Cluster, Request, Timeout).
+
+
+%% @doc Subscribes to a topic, using handler as the callback for arriving events.
+%%
+%%      The method blocks until the subscription is forwarded to the relay.
+%%      There might be a small delay between subscription completion and start of
+%%      event delivery. This is caused by subscription propagation through the
+%%      network.
+%%
+%% @spec (Client, Topic) -> ok | {error, Reason}
+%%      Client = pid()
+%%      Topic      = string()
+%%      Reason     = atom()
+%% @end
+-spec subscribe(Client :: pid(), Topic :: string(), Module :: atom(),	Args :: term()) ->
+	ok | {error, Reason :: atom()}.
+
+subscribe(Client, Topic, Module, Args) ->
+	subscribe(Client, Topic, Module, Args, []).
 
 
 %% @doc Subscribes to a topic, using handler as the callback for arriving events.
