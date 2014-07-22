@@ -392,7 +392,7 @@ handle_cast({handle_tunnel_init, BuildId, ChunkLimit}, State = #state{sock = Soc
 	{noreply, State#state{tunIdx = TunId+1}};
 
 % Delivers a reply to a pending tunneling request.
-handle_cast({handle_tunnel_result, TunId, Result}, State) ->
+handle_cast({handle_tunnel_result, TunId, Result}, State = #state{sock = Sock}) ->
 	% Fetch the result channel and remove from state
 	{TunId, From, Logger} = hd(ets:lookup(State#state.tunPend, TunId)),
 	{TunId, Tunnel}       = hd(ets:lookup(State#state.tunLive, TunId)),
@@ -405,7 +405,7 @@ handle_cast({handle_tunnel_result, TunId, Result}, State) ->
 	Reply = case Result of
 		{ok, ChunkLimit} ->
 			iris_logger:info(Logger, "tunnel construction completed", [{chunk_limit, ChunkLimit}]),
-			ok = iris_proto:send_tunnel_allowance(State#state.sock, TunId, iris_limits:default_tunnel_buffer()),
+			ok = iris_proto:send_tunnel_allowance(Sock, TunId, iris_limits:default_tunnel_buffer()),
 			{ok, Tunnel};
 		{error, Reason} ->
 			iris_logger:warn(Logger, "tunnel construction failed", [{reason, Reason}]),

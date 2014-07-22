@@ -71,21 +71,7 @@ finalize(Tunnel, Result) ->
 	gen_server:call(Tunnel, {finalize, Result}).
 
 
-%% @private
--spec potentially_send() -> ok.
-
-potentially_send() ->
- 	gen_server:cast(self(), potentially_send).
-
-
-%% @private
--spec potentially_recv() -> ok.
-
-potentially_recv() ->
-	gen_server:cast(self(), potentially_recv).
-
-
- % =============================================================================
+%% =============================================================================
 %% Internal API callback functions
 %% =============================================================================
 
@@ -189,9 +175,8 @@ handle_call({schedule_send, Payload, Timeout}, From, State = #state{atoiPend = n
 	end,
 
 	% Create the pending send task and potentially send a chunk
-	ok   = potentially_send(),
 	Task = {Payload, 0, From, TRef},
-	{noreply, State#state{atoiPend = Task}};
+	{noreply, potentially_send(State#state{atoiPend = Task})};
 
 %% Retrieves an inbound message from the local buffer and acks remote endpoint.
 %% If no message is available locally, a timer is started and the call blocks.
@@ -207,9 +192,8 @@ handle_call({schedule_recv, Timeout}, From, State = #state{itoaPend = nil}) ->
 	end,
 
 	% Create a pending receive task and potentially receive a message
-	ok   = potentially_recv(),
 	Task = {From, TRef},
-	{noreply, State#state{itoaPend = Task}};
+	{noreply, potentially_recv(State#state{itoaPend = Task})};
 
 %% Notifies the conn of the close request (which may or may not forward it to
 %% the Iris node), and terminates the process.
@@ -223,70 +207,9 @@ handle_call(close, From, State = #state{}) ->
 	end.
 
 %% @private
-%% If there is enough allowance and data schedules, sends a chunk to the relay.
-handle_cast(potentially_send, State = #state{atoiPend = nil}) ->
-	{noreply, State};
-
-handle_cast(potentially_send, State = #state{atoiPend = Task, atoiSpace = Allowance}) ->
-	% Expand the task into it's components
-	{Payload, Sent, From, TRef} = Task,
-	Size = erlang:min(byte_size(Payload) - Sent, State#state.chunkLimit),
-	case Allowance >= Size of
-		true ->
-			% Calculate the chunk size and fetch the data blob
-			SizeOrCont = case Sent of
-				0 -> byte_size(Payload);
-				_ -> 0
-			end,
-			Chunk = binary:part(Payload, Sent, Size),
-
-			NewAllowance = Allowance - Size,
-			NewSent      = Sent + Size,
-			NewTask      = {Payload, NewSent, From, TRef},
-
-			% Send over a data chunk
-			ok = iris_conn:tunnel_send(State#state.conn, State#state.id, SizeOrCont, Chunk),
-
-			% Either finish, or enqueue another send
-			case NewSent == byte_size(Payload) of
-				 true ->
-					% Message fully sent, reply to the sender
-					case TRef of
-						nil -> ok;
-						_   -> {ok, cancel} = timer:cancel(TRef)
-					end,
-					gen_server:reply(From, ok),
-					{noreply, State#state{atoiPend = nil, atoiSpace = NewAllowance}};
-				false ->
-					% Chunks still remaining, potentially send another one
-					ok = potentially_send(),
-					{noreply, State#state{atoiPend = NewTask, atoiSpace = NewAllowance}}
-			end;
-		false -> {noreply, State}
-	end;
-
-handle_cast(potentially_recv, State = #state{itoaPend = nil}) ->
-	{noreply, State};
-
-handle_cast(potentially_recv, State = #state{itoaBuf = []}) ->
-	{noreply, State};
-
-handle_cast(potentially_recv, State = #state{itoaPend = Wait, itoaBuf = [First | Rest]}) ->
-	{From, TRef} = Wait,
-	case TRef of
-		nil    -> ok;
-		_Other ->	{ok, cancel} = timer:cancel(TRef)
-	end,
-	case iris_conn:tunnel_allowance(State#state.conn, State#state.id, byte_size(First)) of
-		ok    -> gen_server:reply(From, {ok, First});
-		Error -> gen_server:reply(From, Error)
-	end,
-	{noreply, State#state{itoaPend = nil, itoaBuf = Rest}};
-
 %% Increments the available outbound space and invokes a potential send.
 handle_cast({handle_allowance, Space}, State = #state{atoiSpace = Allowance}) ->
-	ok = potentially_send(),
-	{noreply, State#state{atoiSpace = Allowance + Space}};
+	{noreply, potentially_send(State#state{atoiSpace = Allowance + Space})};
 
 %% Accepts an inbound data packet, and either delivers it to a pending receive
 %% or buffers it locally.
@@ -314,9 +237,8 @@ handle_cast({handle_transfer, SizeOrCont, Payload}, State = #state{itoaBuf = Que
 	NewArrived = Arrived + byte_size(Payload),
 	case NewArrived of
 		Total ->
-			potentially_recv(),
 			Message = binary:list_to_bin(lists:reverse(NewBuffer)),
-			{noreply, State#state{itoaBuf = Queue ++ [Message], chunkBuf = [], chunkSize = 0, chunkTotal = 0}};
+			{noreply, potentially_recv(State#state{itoaBuf = Queue ++ [Message], chunkBuf = [], chunkSize = 0, chunkTotal = 0})};
 		_ ->
 			{noreply, State#state{chunkBuf = NewBuffer, chunkSize = NewArrived, chunkTotal = Total}}
 	end;
@@ -388,6 +310,68 @@ handle_info(recv_timeout, State = #state{itoaPend = Task}) ->
 %% @private
 %% Cleanup method, does nothing really.
 terminate(_Reason, _State) -> ok.
+
+
+%% =============================================================================
+%% Generic server internal methods
+%% =============================================================================
+
+%% Sends as many chunks to the relay as data allowance permits.
+potentially_send(State = #state{atoiPend = nil}) -> State;
+
+potentially_send(State = #state{atoiPend = Task, atoiSpace = Allowance}) ->
+	% Expand the task into it's components
+	{Payload, Sent, From, TRef} = Task,
+	Size = erlang:min(byte_size(Payload) - Sent, State#state.chunkLimit),
+	case Allowance >= Size of
+		true ->
+			% Calculate the chunk size and fetch the data blob
+			SizeOrCont = case Sent of
+				0 -> byte_size(Payload);
+				_ -> 0
+			end,
+			Chunk = binary:part(Payload, Sent, Size),
+
+			NewAllowance = Allowance - Size,
+			NewSent      = Sent + Size,
+			NewTask      = {Payload, NewSent, From, TRef},
+
+			% Send over a data chunk
+			ok = iris_conn:tunnel_send(State#state.conn, State#state.id, SizeOrCont, Chunk),
+
+			% Either finish, or enqueue another send
+			case NewSent == byte_size(Payload) of
+				 true ->
+					% Message fully sent, reply to the sender
+					case TRef of
+						nil -> ok;
+						_   -> {ok, cancel} = timer:cancel(TRef)
+					end,
+					gen_server:reply(From, ok),
+					State#state{atoiPend = nil, atoiSpace = NewAllowance};
+				false ->
+					% Chunks still remaining, potentially send another one
+					potentially_send(State#state{atoiPend = NewTask, atoiSpace = NewAllowance})
+			end;
+		false -> State
+	end.
+
+
+%% Delivers a message to a pending receive.
+potentially_recv(State = #state{itoaPend = nil}) -> State;
+potentially_recv(State = #state{itoaBuf = []})   -> State;
+
+potentially_recv(State = #state{itoaPend = Wait, itoaBuf = [First | Rest]}) ->
+	{From, TRef} = Wait,
+	case TRef of
+		nil    -> ok;
+		_Other ->	{ok, cancel} = timer:cancel(TRef)
+	end,
+	case iris_conn:tunnel_allowance(State#state.conn, State#state.id, byte_size(First)) of
+		ok    -> gen_server:reply(From, {ok, First});
+		Error -> gen_server:reply(From, Error)
+	end,
+	State#state{itoaPend = nil, itoaBuf = Rest}.
 
 
 %% =============================================================================
