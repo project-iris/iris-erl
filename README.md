@@ -163,7 +163,7 @@ iris_logger:level(debug)
 
 Note, that log levels permitted by the binding may still be filtered out by _lager_ and vice versa. This is an intentional feature to allow silencing the binding even when _lager_ would allow more detailed logs.
 
-Each `iris_client`, `iris_server` and `iris.Tunnel` has an embedded logger, through which contextual log entries may be printed (i.e. tagged with the specific id of the attached entity).
+Each `iris_client`, `iris_server` and `iris_tunnel` has an embedded logger, through which contextual log entries may be printed (i.e. tagged with the specific id of the attached entity).
 
 ```erlang
 {ok, Client} = iris_client:start(?CONFIG_RELAY),
