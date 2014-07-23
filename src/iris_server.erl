@@ -6,7 +6,7 @@
 %% For details please see http://iris.karalabe.com/downloads#License
 
 -module(iris_server).
--export([start/4, start/5, start_link/4, start_link/5, stop/1, reply/2]).
+-export([start/4, start/5, start_link/4, start_link/5, stop/1, reply/2, logger/1]).
 -export([handle_broadcast/2, handle_request/4, handle_tunnel/2]).
 
 -behaviour(gen_server).
@@ -140,6 +140,10 @@ reply(Client, Reply) ->
 	iris_conn:reply(Client, Reply).
 
 
+logger(Server) ->
+	gen_server:call(Server, {logger}, infinity).
+
+
 %% =============================================================================
 %% Internal API callback functions
 %% =============================================================================
@@ -244,7 +248,11 @@ init({Port, Cluster, Module, Args, Options}) ->
 %% @private
 %% Closes the Iris connection, returning the result to the caller.
 handle_call(stop, _From, State = #state{conn = Conn}) ->
-	{stop, normal, iris_conn:close(Conn), State#state{conn = nil}}.
+	{stop, normal, iris_conn:close(Conn), State#state{conn = nil}};
+
+%% Retrieves the logger associated with the server.
+handle_call({logger}, _From, State = #state{logger = Logger}) ->
+	{reply, Logger, State}.
 
 %% @private
 %% Delivers a broadcast message to the callback and processes the result.

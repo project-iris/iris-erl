@@ -10,7 +10,7 @@
 -module(iris_conn).
 -export([connect/2, connect_link/2, register/5, register_link/5, close/1,
 	broadcast/3, request/4, reply/2, subscribe/5, publish/3, unsubscribe/2,
-	tunnel/3, tunnel_send/4, tunnel_allowance/3, tunnel_close/2]).
+	tunnel/3, tunnel_send/4, tunnel_allowance/3, tunnel_close/2, logger/1]).
 
 -export([handle_reply/3, handle_tunnel_init/3, handle_tunnel_result/3,
 	handle_tunnel_close/2]).
@@ -142,6 +142,10 @@ tunnel_allowance(Connection, TunId, Allowance) ->
 
 tunnel_close(Connection, TunId) ->
 	gen_server:call(Connection, {tunnel_close, TunId}, infinity).
+
+
+logger(Connection) ->
+	gen_server:call(Connection, {logger}, infinity).
 
 
 %% =============================================================================
@@ -349,7 +353,11 @@ handle_call({tunnel_allowance, TunId, Allowance}, _From, State = #state{sock = S
 %% Forwards a tunnel closing request to the relay if not yet closed remotely and
 %% removes the tunnel from the local state.
 handle_call({tunnel_close, TunId}, _From, State = #state{sock = Sock}) ->
-	{reply, iris_proto:send_tunnel_close(Sock, TunId), State}.
+	{reply, iris_proto:send_tunnel_close(Sock, TunId), State};
+
+%% Retrieves the logger associated with the connection.
+handle_call({logger}, _From, State = #state{logger = Logger}) ->
+	{reply, Logger, State}.
 
 %% Delivers a reply to a pending request.
 handle_cast({handle_reply, Id, Response}, State) ->

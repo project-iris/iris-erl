@@ -155,15 +155,38 @@ The logger can be fine-tuned through the `iris_logger` module. Below are a few c
 
 ```erlang
 % Discard all log entries
-iris_logger:level(none),
+iris_logger:level(none)
 
 // Log DEBUG level entries
-iris_logger:level(debug),
+iris_logger:level(debug)
 ```
 
 Note, that log levels permitted by the binding may still be filtered out by _lager_ and vice versa. This is an intentional feature to allow silencing the binding even when _lager_ would allow more detailed logs.
 
-To be finished...
+Each `iris_client`, `iris_server` and `iris.Tunnel` has an embedded logger, through which contextual log entries may be printed (i.e. tagged with the specific id of the attached entity).
+
+```erlang
+{ok, Client} = iris_client:start(?CONFIG_RELAY),
+
+Logger = iris_client:logger(Client),
+iris_logger:debug(Logger, "debug entry, hidden by default"),
+iris_logger:info(Logger, "info entry, client context included"),
+iris_logger:warn(Logger, "warning entry", [{extra, "some value"}]),
+iris_logger:crit(Logger, "critical entry", [{bool, false}, {int, 1}, {string, "two"}]),
+
+ok = iris_client:stop(Client).
+```
+
+As you can see below, all log entries have been automatically tagged with the `client` attribute, set to the id of the current connection. Since the default log level is _INFO_, the `iris_logger:debug` invocation has no effect. Additionally, arbitrarily many key-value pairs may be included in the entry.
+
+```
+19:17:31.985 [info] connecting new client                    client=1 relay_port=55555
+19:17:31.999 [info] client connection established            client=1
+19:17:32.000 [info] info entry, client context included      client=1
+19:17:32.000 [warning] warning entry                         client=1 extra="some value"
+19:17:32.000 [critical] critical entry                       client=1 bool=false int=1 string=two
+19:17:32.000 [info] detaching from relay                     client=1
+```
 
 ### Additional goodies
 

@@ -6,7 +6,7 @@
 %% For details please see http://iris.karalabe.com/downloads#License
 
 -module(iris_tunnel).
--export([send/3, recv/2, close/1]).
+-export([send/3, recv/2, close/1, logger/1]).
 -export([start_link/2, start_link/3, finalize/2, handle_allowance/2,
 	handle_transfer/3, handle_close/2]).
 
@@ -41,6 +41,10 @@ recv(Tunnel, Timeout) ->
 
 close(Tunnel) ->
 	gen_server:call(Tunnel, close, infinity).
+
+
+logger(Server) ->
+	gen_server:call(Server, {logger}, infinity).
 
 
 %% =============================================================================
@@ -204,7 +208,11 @@ handle_call(close, From, State = #state{}) ->
 			iris_logger:info(State#state.logger, "closing tunnel"),
       ok = iris_conn:tunnel_close(State#state.conn, State#state.id),
       {noreply, State#state{closer = From}}
-	end.
+	end;
+
+%% Retrieves the logger associated with the server.
+handle_call({logger}, _From, State = #state{logger = Logger}) ->
+	{reply, Logger, State}.
 
 %% @private
 %% Increments the available outbound space and invokes a potential send.

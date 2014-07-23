@@ -8,7 +8,7 @@
 -module(iris_client).
 -export([start/1, start_link/1, stop/1]).
 -export([broadcast/3, request/4, subscribe/4, subscribe/5, publish/3,
-	unsubscribe/2, tunnel/3]).
+	unsubscribe/2, tunnel/3, logger/1]).
 
 
 %% @doc Connects to the Iris network as a simple client.
@@ -197,3 +197,7 @@ unsubscribe(Client, Topic) ->
 
 tunnel(Client, Cluster, Timeout) ->
 	iris_conn:tunnel(Client, Cluster, Timeout).
+
+
+logger(Client) ->
+	iris_conn:logger(Client).
