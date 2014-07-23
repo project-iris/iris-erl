@@ -21,7 +21,7 @@ There is a growing community on Twitter [@iriscmf](https://twitter.com/iriscmf),
 
 To import this package, add the following line to `deps` in `rebar.config`:
 
-    {iris, {git, "https://github.com/project-iris/iris-erl.git", {branch, "v1"}}}
+    {iris, ".*", {git, "https://github.com/project-iris/iris-erl.git", {branch, "v1"}}}
 
 To retrieve the package, execute:
 
