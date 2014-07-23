@@ -14,8 +14,10 @@
 -include_lib("lager/include/lager.hrl").
 
 -export([new/0, new/1, new/2, crit/2, crit/3, error/2, error/3, warn/2, warn/3,
-  info/2, info/3, debug/2, debug/3]).
+  info/2, info/3, debug/2, debug/3, level/1]).
 -export_type([logger/0]).
+
+-define(CONFIG_TABLE, iris_logger).
 
 
 %% Contextual logger wrapper around basho's lager.
@@ -61,13 +63,39 @@ debug(Logger, Message)        -> log(debug, Logger, Message, []).
 debug(Logger, Message, Attrs) -> log(debug, Logger, Message, Attrs).
 
 
+%% Sets the level of the logs to be output.
+level(none)  -> set_level(0);
+level(Level) -> set_level(?LEVEL2NUM(Level)).
+
+
 %% =============================================================================
 %% Internal functions
 %% =============================================================================
 
+%% Sets the log level configuration to the value specified.
+set_level(Level) ->
+	try
+		ets:new(?CONFIG_TABLE, [named_table, public, set, {keypos, 1}, {read_concurrency, true}])
+	catch
+		error:badarg -> ok % Config table already exists
+	end,
+	ets:insert(?CONFIG_TABLE, {level, Level}).
+
+
 %% Enters a log entry into the lager ledger.
 log(Level, #logger{context = Ctx, flattened = Pref}, Message, Attrs) ->
-  case ?SHOULD_LOG(Level) of
+	% Fetch any local level filtering
+	Log = try
+		case ets:lookup(?CONFIG_TABLE, level) of
+			[{level, LogLevel}] -> ?LEVEL2NUM(Level) =< LogLevel;
+			[]                  -> ?LEVEL2NUM(Level) =< ?INFO
+		end
+	catch
+		error:badarg -> ?LEVEL2NUM(Level) =< ?INFO % Config table doesn't exist yet
+	end,
+
+	% If locally not filtered, check lager filter
+  case Log and (?SHOULD_LOG(Level)) of
     true  -> lager:log(Level, Ctx ++ Attrs, "~s", [format(Pref, Message, Attrs)]);
     false -> ok
   end.

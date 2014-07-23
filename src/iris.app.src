@@ -2,6 +2,6 @@
   {description, "Iris Erlang binding"},
   {vsn, "1.0.0"},
   {registered, []},
-  {applications, [kernel, stdlib]},
+  {applications, [kernel, stdlib, lager]},
   {env, []}
 ]}.

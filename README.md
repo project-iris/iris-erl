@@ -149,6 +149,20 @@ There is also a sanity limit on the input buffer of a tunnel, but it is not expo
 
 ### Logging
 
+For logging purposes, the Erlang binding uses [basho](https://github.com/basho)'s [lager](https://github.com/basho/lager) library (version 2.0.3).
+
+By default, _INFO_ level logs are collected and printed to _stdout_. This level allows tracking life-cycle events such as client and service attachments, topic subscriptions and tunnel establishments. Further log entries can be requested by lowering the level to _DEBUG_, effectively printing all messages passing through the binding.
+
+The logger can be fine-tuned through the `iris_logger` module. Below are a few common configurations.
+
+```erlang
+% Discard all log entries
+iris_logger:level(none),
+
+// Log DEBUG level entries
+iris_logger:level(debug),
+```
+
 To be finished...
 
 ### Additional goodies
