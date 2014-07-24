@@ -133,13 +133,19 @@ stop(Server) ->
 %%      Reply  = binary()
 %%      Reason = atom()
 %% @end
--spec reply(Client :: term(), Reply :: binary()) ->
+-spec reply(From :: {pid(), term()}, Reply :: {ok, binary()} | {error, string()}) ->
 	ok | {error, Reason :: atom()}.
 
-reply(Client, Reply) ->
-	iris_conn:reply(Client, Reply).
+reply(From, Reply) ->
+	iris_conn:reply(From, Reply).
 
 
+%% @doc Retrieves the contextual logger associated with the server.
+%%
+%% @spec (Server) -> Logger
+%%      Server = pid()
+%%      Logger = iris_logger:logger()
+%% @end
 logger(Server) ->
 	gen_server:call(Server, {logger}, infinity).
 

@@ -169,7 +169,7 @@ handle_tunnel_init(Connection, Id, ChunkLimit) ->
 
 
 -spec handle_tunnel_result(Connection :: pid(), Id :: non_neg_integer(),
-	Result :: {ok, ChunkLimit :: pos_integer} | {error, timeout}) -> ok.
+	Result :: {ok, ChunkLimit :: pos_integer()} | {error, timeout}) -> ok.
 
 handle_tunnel_result(Connection, Id, Result) ->
 	gen_server:cast(Connection, {handle_tunnel_result, Id, Result}).

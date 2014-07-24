@@ -7,12 +7,18 @@
 
 -module(iris_tunnel).
 -export([send/3, recv/2, close/1, logger/1]).
+-export_type([tunnel/0]).
+
 -export([start_link/2, start_link/3, finalize/2, handle_allowance/2,
 	handle_transfer/3, handle_close/2]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
 	code_change/3]).
+
+
+%% Communication stream between the local application and a remote endpoint.
+-type tunnel() :: pid().
 
 
 %% =============================================================================
@@ -43,8 +49,14 @@ close(Tunnel) ->
 	gen_server:call(Tunnel, close, infinity).
 
 
-logger(Server) ->
-	gen_server:call(Server, {logger}, infinity).
+%% @doc Retrieves the contextual logger associated with the tunnel.
+%%
+%% @spec (Tunnel) -> Logger
+%%      Tunnel = pid()
+%%      Logger = iris_logger:logger()
+%% @end
+logger(Tunnel) ->
+	gen_server:call(Tunnel, {logger}, infinity).
 
 
 %% =============================================================================

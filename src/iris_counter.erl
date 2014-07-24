@@ -9,7 +9,7 @@
 %% Although it seems to violate all Erlang best practices, it is used solely for
 %% logging purposes, so don't fret about it too much.
 
-%% private
+%% @private
 
 -module(iris_counter).
 -export([next_id/1]).
@@ -25,14 +25,11 @@ next_id(Name) ->
       Pid = spawn(fun() -> loop(1) end),
       try
         case register(Counter, Pid) of
-          false ->
-            % Race, already registered, kill the new
-            Pid ! exit;
           true -> ok
         end
       catch
         error:badarg ->
-          % Register sometimes failed with badarg
+            % Race, already registered, kill the new
           Pid ! exit
       end,
 

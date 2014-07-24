@@ -7,8 +7,6 @@
 
 %% Contains the user configurable contextual logger.
 
-%% private
-
 -module(iris_logger).
 -compile([{parse_transform, lager_transform}]).
 -include_lib("lager/include/lager.hrl").

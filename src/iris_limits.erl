@@ -7,7 +7,7 @@
 
 %% Contains the default service, topic and tunnel limits used by the binding.
 
-%% private
+%% @private
 
 -module(iris_limits).
 -export([default_broadcast_memory/0, default_request_memory/0,

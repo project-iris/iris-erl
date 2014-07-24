@@ -5,20 +5,28 @@
 %% cloud messaging framework, and as such, the same licensing terms apply.
 %% For details please see http://iris.karalabe.com/downloads#License
 
+%% @doc Module responsible for initiating communication within the Iris network.
+%% @end
+
 -module(iris_client).
 -export([start/1, start_link/1, stop/1]).
 -export([broadcast/3, request/4, subscribe/4, subscribe/5, publish/3,
 	unsubscribe/2, tunnel/3, logger/1]).
+-export_type([client/0]).
+
+
+%% client interface to the local Iris node. All outbound messaging passes through one of these.
+-type client() :: pid().
 
 
 %% @doc Connects to the Iris network as a simple client.
 %%
 %% @spec (Port) -> {ok, Client} | {error, Reason}
 %%      Port   = pos_integer()
-%%      Client = pid()
+%%      Client = iris_client:client()
 %%      Reason = term()
 %% @end
--spec start(Port :: pos_integer()) ->	{ok, Client :: pid()} | {error, Reason :: term()}.
+-spec start(Port :: pos_integer()) ->	{ok, Client :: client()} | {error, Reason :: term()}.
 
 start(Port) ->
   Logger = iris_logger:new([{client, iris_counter:next_id(client)}]),
@@ -37,10 +45,10 @@ start(Port) ->
 %%
 %% @spec (Port) -> {ok, Client} | {error, Reason}
 %%      Port   = pos_integer()
-%%      Client = pid()
+%%      Client = iris_client:client()
 %%      Reason = term()
 %% @end
--spec start_link(Port :: pos_integer()) -> {ok, Client :: pid()} | {error, Reason :: term()}.
+-spec start_link(Port :: pos_integer()) -> {ok, Client :: client()} | {error, Reason :: term()}.
 
 start_link(Port) ->
   Logger = iris_logger:new([{client, iris_counter:next_id(client)}]),
@@ -61,10 +69,10 @@ start_link(Port) ->
 %%      node.
 %%
 %% @spec (Client) -> ok | {error, Reason}
-%%      Client = pid()
+%%      Client = iris_client:client()
 %%      Reason = term()
 %% @end
--spec stop(Client :: pid()) -> ok | {error, Reason :: term()}.
+-spec stop(Client :: client()) -> ok | {error, Reason :: term()}.
 
 stop(Client) ->	iris_conn:close(Client).
 
@@ -75,11 +83,11 @@ stop(Client) ->	iris_conn:close(Client).
 %%      The call blocks until the message is forwarded to the local Iris node.
 %%
 %% @spec (Client, Cluster, Message) -> ok
-%%      Client  = pid()
+%%      Client  = iris_client:client()
 %%      Cluster = string()
 %%      Message = binary()
 %% @end
--spec broadcast(Client :: pid(), Cluster :: string(), Message :: binary()) -> ok.
+-spec broadcast(Client :: client(), Cluster :: string(), Message :: binary()) -> ok.
 
 broadcast(Client, Cluster, Message) ->
 	ok = iris_conn:broadcast(Client, Cluster, Message).
@@ -92,112 +100,126 @@ broadcast(Client, Cluster, Message) ->
 %%      The timeout unit is in milliseconds. Infinity is not supported!
 %%
 %% @spec (Client, Cluster, Request, Timeout) -> {ok, Reply} | {error, Reason}
-%%      Client  = pid()
+%%      Client  = iris_client:client()
 %%      Cluster = string()
 %%      Request = binary()
 %%      Timeout = pos_integer()
 %%      Reply   = binary()
 %%      Reason  = timeout | string()
 %% @end
--spec request(Client :: pid(), Cluster :: string(), Request :: binary(), Timeout :: pos_integer()) ->
+-spec request(Client :: client(), Cluster :: string(), Request :: binary(), Timeout :: pos_integer()) ->
   {ok, Reply :: binary()} | {error, Reason :: (timeout | string())}.
 
 request(Client, Cluster, Request, Timeout) ->
   iris_conn:request(Client, Cluster, Request, Timeout).
 
 
-%% @doc Subscribes to a topic, using handler as the callback for arriving events.
+%% @doc Subscribes to a topic, using an iris_topic behavior as the callback for
+%%      arriving events.
 %%
 %%      The method blocks until the subscription is forwarded to the relay.
 %%      There might be a small delay between subscription completion and start of
 %%      event delivery. This is caused by subscription propagation through the
 %%      network.
 %%
-%% @spec (Client, Topic) -> ok | {error, Reason}
-%%      Client = pid()
-%%      Topic      = string()
-%%      Reason     = atom()
+%% @spec (Client, Topic, Module, Args) -> ok | {error, Reason}
+%%      Client = iris_client:client()
+%%      Topic  = string()
+%%      Module = atom()
+%%      Args   = term()
+%%      Reason = atom()
 %% @end
--spec subscribe(Client :: pid(), Topic :: string(), Module :: atom(),	Args :: term()) ->
+-spec subscribe(Client :: client(), Topic :: string(), Module :: atom(),	Args :: term()) ->
 	ok | {error, Reason :: atom()}.
 
 subscribe(Client, Topic, Module, Args) ->
 	subscribe(Client, Topic, Module, Args, []).
 
 
-%% @doc Subscribes to a topic, using handler as the callback for arriving events.
+%% @doc Subscribes to a topic, using an iris_topic behavior as the callback for
+%%      arriving events.
 %%
 %%      The method blocks until the subscription is forwarded to the relay.
 %%      There might be a small delay between subscription completion and start of
 %%      event delivery. This is caused by subscription propagation through the
 %%      network.
 %%
-%% @spec (Client, Topic) -> ok | {error, Reason}
-%%      Client = pid()
-%%      Topic      = string()
-%%      Reason     = atom()
+%% @spec (Client, Topic, Module, Args, Options) -> ok | {error, Reason}
+%%      Client  = iris_client:client()
+%%      Topic   = string()
+%%      Module  = atom()
+%%      Args    = term()
+%%      Options = [Option]
+%%        Option = {event_memory, Limit}
+%%          Limit = pos_integer()
+%%      Reason  = atom()
 %% @end
--spec subscribe(Client :: pid(), Topic :: string(), Module :: atom(),	Args :: term(),
+-spec subscribe(Client :: client(), Topic :: string(), Module :: atom(),	Args :: term(),
 	Options :: [{atom(), term()}]) ->	ok | {error, Reason :: atom()}.
 
 subscribe(Client, Topic, Module, Args, Options) ->
 	iris_conn:subscribe(Client, Topic, Module, Args, Options).
 
 
-%% @doc Publishes an event to all applications subscribed to the topic. No
-%%      guarantees are made that all subscribers receive the message (best
-%%      effort).
+%% @doc Publishes an event asynchronously to topic. No guarantees are made that
+%%      all subscribers receive the message (best effort).
 %%
-%%      The call blocks until the message is sent to the relay node.
+%%      The method blocks until the message is forwarded to the local Iris node.
 %%
 %% @spec (Client, Topic, Event) -> ok | {error, Reason}
-%%      Client = pid()
-%%      Topic      = string()
-%%      Event      = binary()
-%%      Reason     = atom()
+%%      Client = iris_client:client()
+%%      Topic  = string()
+%%      Event  = binary()
+%%      Reason = atom()
 %% @end
--spec publish(Client :: pid(), Topic :: string(), Event :: binary()) ->
+-spec publish(Client :: client(), Topic :: string(), Event :: binary()) ->
 	ok | {error, Reason :: atom()}.
 
 publish(Client, Topic, Event) ->
 	iris_conn:publish(Client, Topic, Event).
 
 
-%% @doc Unsubscribes from a previously subscribed topic.
+%% @doc Unsubscribes from topic, receiving no more event notifications for it.
 %%
-%%      The call blocks until the message is sent to the relay node.
+%%      The method blocks until the unsubscription is forwarded to the local Iris node.
 %%
 %% @spec (Client, Topic) -> ok | {error, Reason}
-%%      Client = pid()
-%%      Topic      = string()
-%%      Reason     = atom()
+%%      Client = iris_client:client()
+%%      Topic  = string()
+%%      Reason = atom()
 %% @end
--spec unsubscribe(Client :: pid(), Topic :: string()) ->
+-spec unsubscribe(Client :: client(), Topic :: string()) ->
 	ok | {error, Reason :: atom()}.
 
 unsubscribe(Client, Topic) ->
 	iris_conn:unsubscribe(Client, Topic).
 
 
-%% @doc Opens a direct tunnel to an instance of app, allowing pairwise-exclusive
-%%      and order-guaranteed message passing between them.
+%% @doc Opens a direct tunnel to a member of a remote cluster, allowing pairwise-exclusive,
+%%      order-guaranteed and throttled message passing between them.
 %%
-%%      The call blocks until the either the newly created tunnel is set up, or
-%%      a timeout occurs.
+%%      The method blocks until the newly created tunnel is set up, or the time
+%%      limit is reached.
 %%
 %% @spec (Client, Cluster, Timeout) -> {ok, Tunnel} | {error, Reason}
-%%      Client = pid()
-%%      Cluster        = string()
-%%      Timeout    = pos_integer()
-%%      Tunnel     = tunnel()
-%%      Reason     = timeout | atom()
+%%      Client  = iris_client:client()
+%%      Cluster = string()
+%%      Timeout = pos_integer()
+%%      Tunnel  = iris_tunnel:tunnel()
+%%      Reason  = timeout | atom()
 %% @end
--spec tunnel(Client :: pid(), Cluster :: string(), Timeout :: pos_integer()) ->
-	{ok, Tunnel :: pid()} | {error, Reason :: atom()}.
+-spec tunnel(Client :: client(), Cluster :: string(), Timeout :: pos_integer()) ->
+	{ok, Tunnel :: iris_tunnel:tunnel()} | {error, Reason :: atom()}.
 
 tunnel(Client, Cluster, Timeout) ->
 	iris_conn:tunnel(Client, Cluster, Timeout).
 
 
+%% @doc Retrieves the contextual logger associated with the client.
+%%
+%% @spec (Client) -> Logger
+%%      Client = iris_client:client()
+%%      Logger = iris_logger:logger()
+%% @end
 logger(Client) ->
 	iris_conn:logger(Client).

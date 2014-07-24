@@ -1,21 +1,195 @@
-@copyright 2013 Project Iris. All rights reserved.
+@doc
 
-@doc This is the official Erlang language binding for the Iris decentralized messaging framework.
+<p>This is the official Erlang language binding for the Iris cloud messaging framework. Version <code>v1</code> of the binding is compatible with Iris <code>v0.3.0</code> and newer.</p>
 
-== Iris Background ==
+<p>If you are unfamiliar with Iris, please read the next introductory section. It contains a short summary, as well as some valuable pointers on where you can discover more.</p>
 
-<ul>
-	<li>For a quick overview of Iris, please see the Iris teaser presentation: [http://iris.karalabe.com/talks/teaser.slide],</li>
-	<li>for further information and other language bindings check the Iris website: [http://iris.karalabe.com]</li>
-	<li>and lastly for source codes check the Iris github projects: [http://github.com/karalabe].</li>
-</ul>
+<h2>
+<a name="user-content---background" class="anchor" href="#--background" aria-hidden="true"><span class="octicon octicon-link"></span></a>  Background</h2>
 
-== Erlang Binding ==
+<p>Iris is an attempt at bringing the simplicity and elegance of cloud computing to the application layer. Consumer clouds provide unlimited virtual machines at the click of a button, but leaves it to developer to wire them together. Iris ensures that you can forget about networking challenges and instead focus on solving your own domain problems.</p>
 
-The Erlang binding provides two layers of APIs for interfacing the Iris network:
-<ul>
-  <li>A lower level API which uses direct message passing for receiving network messages: {@link iris}</li>
-  <li>A higher level API which follows the design principles and concepts behind the OTP gen_server: {@link iris} and {@link iris_server}</li>
-</ul>
+<p>It is a completely decentralized messaging solution for simplifying the design and implementation of cloud services. Among others, Iris features zero-configuration (i.e. start it up and it will do its magic), semantic addressing (i.e. application use textual names to address each other), clusters as units (i.e. automatic load balancing between apps of the same name) and perfect secrecy (i.e. all network traffic is encrypted).</p>
+
+<p>You can find further infos on the <a href="http://iris.karalabe.com">Iris website</a> and details of the above features in the <a href="http://iris.karalabe.com/book/core_concepts">core concepts</a> section of <a href="http://iris.karalabe.com/book">the book of Iris</a>. For the scientifically inclined, a small collection of <a href="http://iris.karalabe.com/papers">papers</a> is also available featuring Iris. Slides and videos of previously given public presentations are published in the <a href="http://iris.karalabe.com/talks">talks</a> page.</p>
+
+<p>There is a growing community on Twitter <a href="https://twitter.com/iriscmf">@iriscmf</a>, Google groups <a href="https://groups.google.com/group/project-iris">project-iris</a> and GitHub <a href="https://github.com/project-iris">project-iris</a>.</p>
+
+<h2>
+<a name="user-content---installation" class="anchor" href="#--installation" aria-hidden="true"><span class="octicon octicon-link"></span></a>  Installation</h2>
+
+<p>To import this package, add the following line to <code>deps</code> in <code>rebar.config</code>:</p>
+
+<pre><code>{iris, ".*", {git, "https://github.com/project-iris/iris-erl.git", {branch, "v1"}}}
+</code></pre>
+
+<p>To retrieve the package, execute:</p>
+
+<pre><code>rebar get-deps
+</code></pre>
+
+<p>Refer to it as <em>iris</em>.</p>
+
+<h2>
+<a name="user-content---quickstart" class="anchor" href="#--quickstart" aria-hidden="true"><span class="octicon octicon-link"></span></a>  Quickstart</h2>
+
+<p>Iris uses a relaying architecture, where client applications do not communicate directly with one another, but instead delegate all messaging operations to a local relay process responsible for transferring the messages to the correct destinations. The first step hence to using Iris through any binding is setting up the local <a href="http://iris.karalabe.com/downloads"><em>relay</em> <em>node</em></a>. You can find detailed infos in the <a href="http://iris.karalabe.com/book/run_forrest_run">Run, Forrest, Run</a> section of <a href="http://iris.karalabe.com/book">the book of Iris</a>, but a very simple way would be to start a <em>developer</em> node.</p>
+
+<pre><code>&gt; iris -dev
+Entering developer mode
+Generating random RSA key... done.
+Generating random network name... done.
+
+2014/06/13 18:13:47 main: booting iris overlay...
+2014/06/13 18:13:47 scribe: booting with id 369650985814.
+2014/06/13 18:13:57 main: iris overlay converged with 0 remote connections.
+2014/06/13 18:13:57 main: booting relay service...
+2014/06/13 18:13:57 main: iris successfully booted, listening on port 55555.
+</code></pre>
+
+<p>Since it generates random credentials, a developer node will not be able to connect with other remote nodes in the network. However, it provides a quick solution to start developing without needing to configure a <em>network</em> <em>name</em> and associated <em>access</em> <em>key</em>. Should you wish to interconnect multiple nodes, please provide the <code>-net</code> and <code>-rsa</code> flags.</p>
+
+<h3>
+<a name="user-content-attaching-to-the-relay" class="anchor" href="#attaching-to-the-relay" aria-hidden="true"><span class="octicon octicon-link"></span></a>Attaching to the relay</h3>
+
+<p>After successfully booting, the relay opens a <em>local</em> TCP endpoint (port <code>55555</code> by default, configurable using <code>-port</code>) through which arbitrarily many entities may attach. Each connecting entity may also decide whether it becomes a simple <em>client</em> only consuming the services provided by other participants, or a full fledged <em>service</em>, also making functionality available to others for consumption.</p>
+
+<p>Connecting as a client can be done trivially by <code>iris_client:start/1</code> or <code>iris_client:start_link/1</code> with the port number of the local relay's client endpoint. After the attachment is completed, a connection <code>pid</code> is returned through which messaging can begin. A client cannot accept inbound requests, broadcasts and tunnels, only initiate them.</p>
+
+<div class="highlight highlight-erlang"><pre><span class="c">% Connect to the local relay</span>
+<span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Conn</span><span class="p">}</span> <span class="o">=</span> <span class="nn">iris_client</span><span class="p">:</span><span class="nf">start</span><span class="p">(</span><span class="mi">55555</span><span class="p">),</span>
+
+<span class="c">% Disconnect from the local relay</span>
+<span class="n">ok</span> <span class="o">=</span> <span class="nn">iris_client</span><span class="p">:</span><span class="nf">stop</span><span class="p">(</span><span class="nv">Conn</span><span class="p">)</span>
+</pre></div>
+
+<p>To provide functionality for consumption, an entity needs to register as a service. This is slightly more involved, as beside initiating a registration request, it also needs to specify a callback handler to process inbound events. First, the callback handler needs to implement the <code>iris_server</code> behavior. After writing the handler, registration can commence by invoking <code>iris_server:start/4,/5</code> or <code>iris_server:start_link/4,/5</code> with the port number of the local relay's client endpoint; sub-service cluster this entity will join as a member; callback module to process inbound messages; initialization arguments for the callback module and optional resource caps.</p>
+
+<div class="highlight highlight-erlang"><pre><span class="p">-</span><span class="ni">behaviour</span><span class="p">(</span><span class="n">iris_server</span><span class="p">).</span>
+<span class="p">-</span><span class="ni">export</span><span class="p">([</span><span class="n">init</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="n">handle_broadcast</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="n">handle_request</span><span class="o">/</span><span class="mi">3</span><span class="p">,</span> <span class="n">handle_tunnel</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span>
+    <span class="n">handle_drop</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="n">terminate</span><span class="o">/</span><span class="mi">2</span><span class="p">]).</span>
+
+<span class="c">% Implement all the methods defined by iris_server.</span>
+<span class="nf">init</span><span class="p">(</span><span class="nv">Conn</span><span class="p">,</span> <span class="n">your_init_args</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="n">your_state</span><span class="p">}.</span>
+<span class="nf">terminate</span><span class="p">(</span><span class="nv">Reason</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span>   <span class="o">-&gt;</span> <span class="n">ok</span><span class="p">.</span>
+
+<span class="nf">handle_broadcast</span><span class="p">(</span><span class="nv">Message</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span>     <span class="o">-&gt;</span> <span class="p">{</span><span class="n">noreply</span><span class="p">,</span> <span class="nv">State</span><span class="p">}.</span>
+<span class="nf">handle_request</span><span class="p">(</span><span class="nv">Request</span><span class="p">,</span> <span class="nv">From</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="p">{</span><span class="n">reply</span><span class="p">,</span> <span class="nv">Request</span><span class="p">,</span> <span class="nv">State</span><span class="p">}.</span>
+<span class="nf">handle_tunnel</span><span class="p">(</span><span class="nv">Tunnel</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span>         <span class="o">-&gt;</span> <span class="p">{</span><span class="n">noreply</span><span class="p">,</span> <span class="nv">State</span><span class="p">}.</span>
+<span class="nf">handle_drop</span><span class="p">(</span><span class="nv">Reason</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span>           <span class="o">-&gt;</span> <span class="p">{</span><span class="n">stop</span><span class="p">,</span> <span class="nv">Reason</span><span class="p">,</span> <span class="nv">State</span><span class="p">}.</span>
+
+<span class="nf">main</span><span class="p">()</span> <span class="o">-&gt;</span>
+    <span class="c">% Register a new service to the relay</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Server</span><span class="p">}</span> <span class="o">=</span> <span class="nn">iris_server</span><span class="p">:</span><span class="nf">start</span><span class="p">(</span><span class="mi">55555</span><span class="p">,</span> <span class="s">"echo"</span><span class="p">,</span> <span class="o">?</span><span class="nv">MODULE</span><span class="p">,</span> <span class="n">your_init_args</span><span class="p">),</span>
+
+    <span class="c">% Unregister the service</span>
+    <span class="n">ok</span> <span class="o">=</span> <span class="nn">iris_server</span><span class="p">:</span><span class="nf">stop</span><span class="p">(</span><span class="nv">Server</span><span class="p">).</span>
+</pre></div>
+
+<p>Upon successful registration, Iris invokes the callback module's <code>init/2</code> method with the live connection <code>pid</code> - the service's client connection - through which the service itself can initiate outbound requests, and the user supplied initialization arguments. The <code>init/2</code> is called only once and before any other handler method.</p>
+
+<h3>
+<a name="user-content-messaging-through-iris" class="anchor" href="#messaging-through-iris" aria-hidden="true"><span class="octicon octicon-link"></span></a>Messaging through Iris</h3>
+
+<p>Iris supports four messaging schemes: request/reply, broadcast, tunnel and publish/subscribe. The first three schemes always target a specific cluster: send a request to <em>one</em> member of a cluster and wait for the reply; broadcast a message to <em>all</em> members of a cluster; open a streamed, ordered and throttled communication tunnel to <em>one</em> member of a cluster. The publish/subscribe is similar to broadcast, but <em>any</em> member of the network may subscribe to the same topic, hence breaking cluster boundaries.</p>
+
+<p><a href="https://camo.githubusercontent.com/0d0cc769b597a9358b39a5b2d22bfd1ad3fa8c76/68747470733a2f2f646c2e64726f70626f7875736572636f6e74656e742e636f6d2f752f31303433353930392f497269732f6d6573736167696e675f736368656d65732e706e67" target="_blank"><img src="https://camo.githubusercontent.com/0d0cc769b597a9358b39a5b2d22bfd1ad3fa8c76/68747470733a2f2f646c2e64726f70626f7875736572636f6e74656e742e636f6d2f752f31303433353930392f497269732f6d6573736167696e675f736368656d65732e706e67" data-canonical-src="https://dl.dropboxusercontent.com/u/10435909/Iris/messaging_schemes.png" style="max-width:100%;" /></a></p>
+
+<p>Presenting each primitive is out of scope, but for illustrative purposes the request/reply was included. Given the echo service registered above, we can send it requests and wait for replies through any client connection. Iris will automatically locate, route and load balanced between all services registered under the addressed name.</p>
+
+<div class="highlight highlight-erlang"><pre><span class="nv">Request</span> <span class="o">=</span> <span class="o">&lt;&lt;</span><span class="s">"some request binary"</span><span class="o">&gt;&gt;</span><span class="p">,</span>
+<span class="k">case</span> <span class="nn">iris_client</span><span class="p">:</span><span class="nf">request</span><span class="p">(</span><span class="nv">Conn</span><span class="p">,</span> <span class="s">"echo"</span><span class="p">,</span> <span class="nv">Request</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span> <span class="k">of</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Reply</span><span class="p">}</span>     <span class="o">-&gt;</span> <span class="nn">io</span><span class="p">:</span><span class="nf">format</span><span class="p">(</span><span class="s">"Reply arrived: </span><span class="si">~p</span><span class="s">.</span><span class="si">~n</span><span class="s">"</span><span class="p">,</span> <span class="p">[</span><span class="nv">Reply</span><span class="p">]);</span>
+    <span class="p">{</span><span class="n">error</span><span class="p">,</span> <span class="nv">Reason</span><span class="p">}</span> <span class="o">-&gt;</span> <span class="nn">io</span><span class="p">:</span><span class="nf">format</span><span class="p">(</span><span class="s">"Failed to execute request: </span><span class="si">~p</span><span class="s">.</span><span class="si">~n</span><span class="s">"</span><span class="p">,</span> <span class="p">[</span><span class="nv">Reason</span><span class="p">])</span>
+<span class="k">end</span>
+</pre></div>
+
+<p>An expanded summary of the supported messaging schemes can be found in the <a href="http://iris.karalabe.com/book/core_concepts">core concepts</a> section of <a href="http://iris.karalabe.com/book">the book of Iris</a>. A detailed presentation and analysis of each individual primitive will be added soon.</p>
+
+<h3>
+<a name="user-content-error-handling" class="anchor" href="#error-handling" aria-hidden="true"><span class="octicon octicon-link"></span></a>Error handling</h3>
+
+<p>The binding uses the idiomatic Erlang error handling mechanisms of returning <code>{error, Reason}</code> tuples when a failure occurs. However, there are a few common cases that need to be individually checkable, hence a few special errors values and types have been introduced.</p>
+
+<p>Many operations - such as requests and tunnels - can time out. To allow checking for this particular failure, Iris returns <code>{error, timeout}</code> in such scenarios. Similarly, connections, services and tunnels may fail, in the case of which all pending operations terminate with <code>{error, closed}</code>.</p>
+
+<p>Additionally, the requests/reply pattern supports sending back an error instead of a reply to the caller. To enable the originating node to check whether a request failed locally or remotely, all remote error reasons are wrapped in an <code>{remote, Reason}</code> tuple.</p>
+
+<div class="highlight highlight-erlang"><pre><span class="k">case</span> <span class="nn">iris_client</span><span class="p">:</span><span class="nf">request</span><span class="p">(</span><span class="nv">Conn</span><span class="p">,</span> <span class="s">"cluster"</span><span class="p">,</span> <span class="nv">Request</span><span class="p">,</span> <span class="nv">Timeout</span><span class="p">)</span> <span class="k">of</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Reply</span><span class="p">}</span> <span class="o">-&gt;</span>
+        <span class="c">% Request completed successfully</span>
+    <span class="p">{</span><span class="n">error</span><span class="p">,</span> <span class="n">timeout</span><span class="p">}</span> <span class="o">-&gt;</span>
+        <span class="c">% Request timed out</span>
+    <span class="p">{</span><span class="n">error</span><span class="p">,</span> <span class="n">closed</span><span class="p">}</span> <span class="o">-&gt;</span>
+        <span class="c">% Connection terminated</span>
+    <span class="p">{</span><span class="n">error</span><span class="p">,</span> <span class="p">{</span><span class="n">remote</span><span class="p">,</span> <span class="nv">Reason</span><span class="p">}}</span> <span class="o">-&gt;</span>
+        <span class="c">% Request failed remotely</span>
+    <span class="p">{</span><span class="n">error</span><span class="p">,</span> <span class="nv">Reason</span><span class="p">}</span> <span class="o">-&gt;</span>
+        <span class="c">% Requesting failed locally</span>
+<span class="k">end</span>
+</pre></div>
+
+<h3>
+<a name="user-content-resource-capping" class="anchor" href="#resource-capping" aria-hidden="true"><span class="octicon octicon-link"></span></a>Resource capping</h3>
+
+<p>To prevent the network from overwhelming an attached process, the binding places memory limits on the broadcasts/requests inbound to a registered service as well as on the events received by a topic subscription. The memory limit defines the maximal length of the pending queue.</p>
+
+<p>The default values - listed below - can be overridden during service registration via <code>{broadcast_memory, Limit}</code>, <code>{request_memory, Limit}</code> and during topic subscription via <code>{event_memory, Limit}</code> passed as options. Any unset options will default to the preset ones.</p>
+
+<div class="highlight highlight-erlang"><pre><span class="c">%% Memory allowance for pending broadcasts.</span>
+<span class="nf">default_broadcast_memory</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="mi">64</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">.</span>
+
+<span class="c">%% Memory allowance for pending requests.</span>
+<span class="nf">default_request_memory</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="mi">64</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">.</span>
+
+<span class="c">%% Memory allowance for pending events.</span>
+<span class="nf">default_topic_memory</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="mi">64</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">.</span>
+</pre></div>
+
+<p>There is also a sanity limit on the input buffer of a tunnel, but it is not exposed through the API as tunnels are meant as structural primitives, not sensitive to load. This may change in the future.</p>
+
+<h3>
+<a name="user-content-logging" class="anchor" href="#logging" aria-hidden="true"><span class="octicon octicon-link"></span></a>Logging</h3>
+
+<p>For logging purposes, the Erlang binding uses <a href="https://github.com/basho">basho</a>'s <a href="https://github.com/basho/lager">lager</a> library (version 2.0.3). By default, <em>INFO</em> level logs are collected and printed to <em>stdout</em>. This level allows tracking life-cycle events such as client and service attachments, topic subscriptions and tunnel establishments. Further log entries can be requested by lowering the level to <em>DEBUG</em>, effectively printing all messages passing through the binding.</p>
+
+<p>The logger can be fine-tuned through the <code>iris_logger</code> module. Below are a few common configurations.</p>
+
+<div class="highlight highlight-erlang"><pre><span class="c">% Discard all log entries</span>
+<span class="nn">iris_logger</span><span class="p">:</span><span class="nf">level</span><span class="p">(</span><span class="n">none</span><span class="p">)</span>
+
+<span class="o">//</span> <span class="nv">Log</span> <span class="nv">DEBUG</span> <span class="n">level</span> <span class="n">entries</span>
+<span class="nn">iris_logger</span><span class="p">:</span><span class="nf">level</span><span class="p">(</span><span class="n">debug</span><span class="p">)</span>
+</pre></div>
+
+<p>Note, that log levels permitted by the binding may still be filtered out by <em>lager</em> and vice versa. This is intentional to allow silencing the binding even when <em>lager</em> would allow more detailed logs.</p>
+
+<p>Each <code>iris_client</code>, <code>iris_server</code> and <code>iris_tunnel</code> has an embedded logger, through which contextual log entries may be printed (i.e. tagged with the specific id of the attached entity).</p>
+
+<div class="highlight highlight-erlang"><pre><span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Client</span><span class="p">}</span> <span class="o">=</span> <span class="nn">iris_client</span><span class="p">:</span><span class="nf">start</span><span class="p">(</span><span class="mi">55555</span><span class="p">),</span>
+
+<span class="nv">Logger</span> <span class="o">=</span> <span class="nn">iris_client</span><span class="p">:</span><span class="nf">logger</span><span class="p">(</span><span class="nv">Client</span><span class="p">),</span>
+<span class="nn">iris_logger</span><span class="p">:</span><span class="nf">debug</span><span class="p">(</span><span class="nv">Logger</span><span class="p">,</span> <span class="s">"debug entry, hidden by default"</span><span class="p">),</span>
+<span class="nn">iris_logger</span><span class="p">:</span><span class="nf">info</span><span class="p">(</span><span class="nv">Logger</span><span class="p">,</span> <span class="s">"info entry, client context included"</span><span class="p">),</span>
+<span class="nn">iris_logger</span><span class="p">:</span><span class="nf">warn</span><span class="p">(</span><span class="nv">Logger</span><span class="p">,</span> <span class="s">"warning entry"</span><span class="p">,</span> <span class="p">[{</span><span class="n">extra</span><span class="p">,</span> <span class="s">"some value"</span><span class="p">}]),</span>
+<span class="nn">iris_logger</span><span class="p">:</span><span class="nf">crit</span><span class="p">(</span><span class="nv">Logger</span><span class="p">,</span> <span class="s">"critical entry"</span><span class="p">,</span> <span class="p">[{</span><span class="n">bool</span><span class="p">,</span> <span class="n">false</span><span class="p">},</span> <span class="p">{</span><span class="n">int</span><span class="p">,</span> <span class="mi">1</span><span class="p">},</span> <span class="p">{</span><span class="n">string</span><span class="p">,</span> <span class="s">"two"</span><span class="p">}]),</span>
+
+<span class="n">ok</span> <span class="o">=</span> <span class="nn">iris_client</span><span class="p">:</span><span class="nf">stop</span><span class="p">(</span><span class="nv">Client</span><span class="p">).</span>
+</pre></div>
+
+<p>As you can see below, all log entries have been automatically tagged with the <code>client</code> attribute, set to the id of the current connection. Since the default log level is <em>INFO</em>, the <code>iris_logger:debug</code> invocation has no effect. Additionally, arbitrarily many key-value pairs may be included in the entry.</p>
+
+<pre><code>19:17:31.985 [info] connecting new client                    client=1 relay_port=55555
+19:17:31.999 [info] client connection established            client=1
+19:17:32.000 [info] info entry, client context included      client=1
+19:17:32.000 [warning] warning entry                         client=1 extra="some value"
+19:17:32.000 [critical] critical entry                       client=1 bool=false int=1 string=two
+19:17:32.000 [info] detaching from relay                     client=1
+</code></pre>
+
+<h3>
+<a name="user-content-additional-goodies" class="anchor" href="#additional-goodies" aria-hidden="true"><span class="octicon octicon-link"></span></a>Additional goodies</h3>
+
+<p>You can find a teaser presentation, touching on all the key features of the library through a handful of challenges and their solutions. The recommended version is the <a href="http://play.iris.karalabe.com/talks/binds/erlang.slide">playground</a>, containing modifiable and executable code snippets, but a <a href="http://iris.karalabe.com/talks/binds/erlang.slide">read only</a> one is also available.</p>
 
 @end

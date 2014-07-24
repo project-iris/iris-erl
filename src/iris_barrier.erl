@@ -9,7 +9,7 @@
 %% multiple phases of execution, with the added possibility of leaving early on
 %% and even reporting occurred errors.
 
-%% private
+%% @private
 
 -module(iris_barrier).
 -export([new/1, sync/1, exit/1, exit/2, wait/1, barrier/5]).
