@@ -221,5 +221,7 @@ tunnel(Client, Cluster, Timeout) ->
 %%      Client = iris_client:client()
 %%      Logger = iris_logger:logger()
 %% @end
+-spec logger(Client :: iris_client:client()) -> Logger :: iris_logger:logger().
+
 logger(Client) ->
 	iris_conn:logger(Client).

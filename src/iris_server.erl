@@ -5,6 +5,187 @@
 %% cloud messaging framework, and as such, the same licensing terms apply.
 %% For details please see http://iris.karalabe.com/downloads#License
 
+%% @doc A behavior module for implementing an Iris server micro service. The
+%%      behavior follows the exact same design principles as the OTP gen_server.
+%%
+%%      It is assumed that all handler specific parts are located in a callback
+%%      module, which implements and exports a set of pre-defined functions. The
+%%      relationship between the Iris API and the callback functions is as
+%%      follows:
+%%
+%%      ```
+%%      iris_server module          callback module
+%%      ----------------------      --------------------
+%%      iris_server:start
+%%      iris_server:start_link ---> Module:init/1
+%%      iris_server:stop       ---> Module:terminate/2
+%%      ---                    ---> Module:handle_drop/2
+%%
+%%      iris_client module          callback module
+%%      --------------              -------------------------
+%%      iris_client:broadcast  ---> Module:handle_broadcast/2
+%%      iris_client:request    ---> Module:handle_request/3
+%%      iris_client:tunnel     ---> Module:handle_tunnel/2
+%%      '''
+%%
+%%      If a callback function fails or returns a bad value, the iris_server
+%%      will terminate. Unless otherwise stated, all functions in this module
+%%      fail if the specified iris_server does not exist or if bad arguments are
+%%      given.
+%%
+%%      A slight difference to the gen_server behavior is that the event trigger
+%%      methods have not been duplicated in the iris_server module too, rather
+%%      they use the methods defined in the {@link iris_client} module, as depicted
+%%      in the above table.
+%%
+%%      == Callback methods ==
+%%      Since edoc cannot generate documentation for callback methods, they have
+%%      been included here for reference:
+%%
+%%      === init/2 ===
+%%      ```
+%%      init(Client, Args) -> {ok, State} | {stop, Reason}
+%%          Client = iris_client:client()
+%%          Args   = term()
+%%          State  = term()
+%%          Reason = term()
+%%      '''
+%%			Whenever an iris_server is started using {@link iris_server:start/4} or
+%%      {@link iris_server:start_link/4}, this function is called in the new
+%%      process to initialize the handler state.
+%%
+%%      <ul>
+%%        <li>`Client' is the server's connection to the relay, enabling queries
+%%             to other remote services.</li>
+%%        <li>`Args' is the `Args' argument provided to `start/start_link'.</li>
+%%      </ul><ul>
+%%        <li>If the initialization succeeds, the function should return `{ok,
+%%            State}'.</li>
+%%        <li>Otherwise, the return value should be `{stop, Reason}'</li>
+%%      </ul>
+%%
+%%      === handle_broadcast/2 ===
+%%      ```
+%%      handle_broadcast(Message, State) -> {noreply, NewState} | {stop, Reason, NewState}
+%%          Message  = binary()
+%%          State    = term()
+%%          NewState = term()
+%%          Reason   = term()
+%%      '''
+%%      Whenever an iris_server receives a message sent using {@link iris_client:broadcast/3},
+%%      this function is called to handle it.
+%%
+%%      <ul>
+%%        <li>`Message' is the `Message' argument provided to `broadcast'.</li>
+%%        <li>`State' is the internal state of the iris_server.</li>
+%%      </ul><ul>
+%%        <li>If the function returns `{noreply, NewState}', the iris_server
+%%            will continue executing with `NewState'.</li>
+%%        <li>If the return value is `{stop, Reason, NewState}', the iris_server
+%%            will call `Module:terminate/2' and terminate.</li>
+%%      </ul>
+%%
+%%      === handle_request/3 ===
+%%      ```
+%%      handle_request(Request, From, State) ->
+%%              {reply, Reply, NewState} | {noreply, NewState} |
+%%              {stop, Reason, Reply, NewState} | {stop, Reason, NewState} |
+%%          Request  = binary()
+%%          From     = term()
+%%          State    = term()
+%%          Reply = {ok, Result} | {error, Reason}
+%%            Result = binary()
+%%            Reason = string()
+%%          NewState = term()
+%%          Reason   = term()
+%%      '''
+%%      Whenever an iris_server receives a request sent using {@link iris_client:request/4},
+%%      this function is called to handle it.
+%%
+%%      <ul>
+%%        <li>`Request' is the `Request' argument provided to `request'.</li>
+%%        <li>`From' is the sender address used by {@link iris:reply/2} to send
+%%            an asynchronous reply back.</li>
+%%        <li>`State' is the internal state of the iris_server.</li>
+%%      </ul><ul>
+%%        <li>If the function returns `{reply, Reply, NewState}', the `Reply'
+%%            will be given back to `From' as the return value to `request'. The
+%%            iris_server then will continue executing using `NewState'.</li>
+%%        <li>If the function returns `{noreply, NewState}', the iris_server
+%%            will continue executing with `NewState'. Any reply to `From' must
+%%            be sent back explicitly using {@link iris_server:reply/2}.</li>
+%%        <li>If the return value is `{stop, Reason, Reply, NewState}', `Reply'
+%%            will be sent back to `From', and if `{stop, Reason, NewState}' is
+%%            used, any reply must be sent back explicitly. In either case the
+%%            iris_server will call `Module:terminate/2' and terminate.</li>
+%%      </ul>
+%%
+%%      === handle_tunnel/3 ===
+%%      ```
+%%      handle_tunnel(Tunnel, State) -> {noreply, NewState} | {stop, Reason, NewState}
+%%          Topic    = iris_tunnel:tunnel()
+%%          State    = term()
+%%          NewState = term()
+%%          Reason   = term()
+%%      '''
+%%      Whenever an iris_server receives an inbound tunnel connection sent using
+%%      {@link iris_client:tunnel/3}, this function is called to handle it.
+%%
+%%      <ul>
+%%        <li>`Tunnel' is the Iris data stream used for ordered messaging.</li>
+%%        <li>`State' is the internal state of the iris_server.</li>
+%%      </ul><ul>
+%%        <li>If the function returns `{noreply, NewState}', the iris_server
+%%            will continue executing with `NewState'.</li>
+%%        <li>If the return value is `{stop, Reason, NewState}', the iris_server
+%%            will call `Module:terminate/2' and terminate.</li>
+%%      </ul>
+%%
+%%      Note, handling tunnel connections should be done in spawned children
+%%      processes in order not to block the handler process. The `handle_tunnel'
+%%      method itself is called synchronously in order to allow modifications to
+%%      the internal state if need be.
+%%
+%%      === handle_drop/2 ===
+%%      ```
+%%      handle_drop(Reason, State) -> {noreply, NewState} | {stop, NewReason, NewState}
+%%          Reason    = term()
+%%          State     = term()
+%%          NewState  = term()
+%%          NewReason = term()
+%%      '''
+%%      Error handler called in the event of an unexpected remote closure of the
+%%      relay connection to the local Iris node.
+%%
+%%      <ul>
+%%        <li>`Reason' is the encountered problem (most probably an EOF).</li>
+%%        <li>`State' is the internal state of the iris_server.</li>
+%%      </ul><ul>
+%%        <li>If the function returns `{noreply, NewState}', the iris_server
+%%            will continue executing with `NewState', though no new data will
+%%            arrive, nor can be sent.</li>
+%%        <li>If the return value is `{stop, NewReason, NewState}', the process
+%%            will call `Module:terminate/2' and terminate.</li>
+%%      </ul>
+%%
+%%      === terminate/2 ===
+%%      ```
+%%      terminate(Reason, State)
+%%          Reason    = term()
+%%          State     = term()
+%%      '''
+%%      This method is called when an iris_server is about to terminate. It is
+%%      the opposite of `Module:init/1' and should do any necessary cleaning up.
+%%      The return value is ignored, after which the handler process stops.
+%%
+%%      <ul>
+%%        <li>`Reason' is the term denoting the stop reason. If the iris_server
+%%            is terminating due to a method returning `{stop, ...}', `Reason'
+%%            will have the value specified in that tuple.</li>
+%%        <li>`State' is the internal state of the iris_server.</li>
+%%      </ul>
+%% @end
+
 -module(iris_server).
 -export([start/4, start/5, start_link/4, start_link/5, stop/1, reply/2, logger/1]).
 -export([handle_broadcast/2, handle_request/4, handle_tunnel/2]).
@@ -12,6 +193,12 @@
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_info/2, terminate/2, handle_cast/2,
 	code_change/3]).
+
+-export_type([server/0]).
+
+
+-type server() :: pid(). %% Server interface to the local Iris node. Messages
+                         %% from remote nodes arrive instances of these.
 
 
 %% =============================================================================
@@ -24,7 +211,7 @@
 -callback handle_broadcast(Message :: binary(), State :: term()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
--callback handle_request(Request :: binary(), From :: iris:sender(), State :: term()) ->
+-callback handle_request(Request :: binary(), From :: term(), State :: term()) ->
 	{reply, {ok, Reply :: binary()} | {error, Reason :: term()}, NewState :: term()} | {noreply, NewState :: term()} |
 	{stop, Reply :: binary(), Reason :: term(), NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
@@ -42,9 +229,18 @@
 %% External API functions
 %% =============================================================================
 
-%% No option version of the extended start method. See the next method below.
+%% @doc No option version of the extended start method. See the next method below.
+%%
+%% @spec (Port, Cluster, Module, Args) -> {ok, Server} | {error, Reason}
+%%      Port    = pos_integer()
+%%      Cluster = string()
+%%      Module  = atom()
+%%      Args    = term()
+%%      Server  = iris_server:server()
+%%      Reason  = term()
+%% @end
 -spec start(Port :: pos_integer(), Cluster :: string(), Module :: atom(), Args :: term()) ->
-	{ok, Server :: pid()} | {error, Reason :: term()}.
+	{ok, Server :: iris_server:server()} | {error, Reason :: term()}.
 
 start(Port, Cluster, Module, Args) ->
 	start(Port, Cluster, Module, Args, []).
@@ -63,20 +259,30 @@ start(Port, Cluster, Module, Args) ->
 %%      Options = [Option]
 %%        Option = {broadcast_memory, Limit} | {request_memory, Limit}
 %%          Limit = pos_integer()
-%%      Server  = pid()
+%%      Server  = iris_server:server()
 %%      Reason  = term()
 %% @end
 -spec start(Port :: pos_integer(), Cluster :: string(), Module :: atom(),
 	Args :: term(), Options :: [{atom(), term()}]) ->
-	{ok, Server :: pid()} | {error, Reason :: term()}.
+	{ok, Server :: iris_server:server()} | {error, Reason :: term()}.
 
 start(Port, Cluster, Module, Args, Options) ->
 	gen_server:start(?MODULE, {Port, Cluster, Module, Args, Options}, []).
 
 
-%% No option version of the extended start_link method. See the next method below.
+%% @doc No option version of the extended start_link method. See the next method
+%%      below.
+%%
+%% @spec (Port, Cluster, Module, Args) -> {ok, Server} | {error, Reason}
+%%      Port    = pos_integer()
+%%      Cluster = string()
+%%      Module  = atom()
+%%      Args    = term()
+%%      Server  = iris_server:server()
+%%      Reason  = term()
+%% @end
 -spec start_link(Port :: pos_integer(), Cluster :: string(), Module :: atom(), Args :: term()) ->
-	{ok, Server :: pid()} | {error, Reason :: term()}.
+	{ok, Server :: iris_server:server()} | {error, Reason :: term()}.
 
 start_link(Port, Cluster, Module, Args) ->
 	start_link(Port, Cluster, Module, Args, []).
@@ -95,12 +301,12 @@ start_link(Port, Cluster, Module, Args) ->
 %%      Options = [Option]
 %%        Option = {broadcast_memory, Limit} | {request_memory, Limit}
 %%          Limit = pos_integer()
-%%      Server  = pid()
+%%      Server  = iris_server:server()
 %%      Reason  = term()
 %% @end
 -spec start_link(Port :: pos_integer(), Cluster :: string(), Module :: atom(),
 	Args :: term(), Options :: [{atom(), term()}]) ->
-	{ok, Server :: pid()} | {error, Reason :: term()}.
+	{ok, Server :: iris_server:server()} | {error, Reason :: term()}.
 
 start_link(Port, Cluster, Module, Args, Options) ->
 	gen_server:start_link(?MODULE, {Port, Cluster, Module, Args, Options}, []).
@@ -112,10 +318,10 @@ start_link(Port, Cluster, Module, Args, Options) ->
 %%      The call blocks until the tear-down is confirmed by the Iris node.
 %%
 %% @spec (Server) -> ok | {error, Reason}
-%%      Server     = pid()
-%%      Reason     = atom()
+%%      Server = iris_server:server()
+%%      Reason = atom()
 %% @end
--spec stop(Server :: pid()) ->
+-spec stop(Server :: iris_server:server()) ->
 	ok | {error, Reason :: term()}.
 
 stop(Server) ->
@@ -126,14 +332,14 @@ stop(Server) ->
 %%      to a client that called request/4 when the reply cannot be defined in
 %%      the return value of Module:handle_request/3.
 %%
-%%      Client must be the From argument provided to the callback function.
+%%      From must be the From argument provided to the callback function.
 %%
-%% @spec (Client, Reply) -> ok | {error, Reason}
-%%      Client = sender()
+%% @spec (From, Reply) -> ok | {error, Reason}
+%%      From   = term()
 %%      Reply  = binary()
 %%      Reason = atom()
 %% @end
--spec reply(From :: {pid(), term()}, Reply :: {ok, binary()} | {error, string()}) ->
+-spec reply(From :: {pid(), pos_integer()}, Reply :: {ok, binary()} | {error, string()}) ->
 	ok | {error, Reason :: atom()}.
 
 reply(From, Reply) ->
@@ -143,9 +349,11 @@ reply(From, Reply) ->
 %% @doc Retrieves the contextual logger associated with the server.
 %%
 %% @spec (Server) -> Logger
-%%      Server = pid()
+%%      Server = iris_server:server()
 %%      Logger = iris_logger:logger()
 %% @end
+-spec logger(Server :: iris_server:server()) -> Logger :: iris_logger:logger().
+
 logger(Server) ->
 	gen_server:call(Server, {logger}, infinity).
 
@@ -173,8 +381,8 @@ handle_request(Limiter, Id, Request, Timeout) ->
 
 
 %% @private
-%%
--spec handle_tunnel(Server :: pid(), Tunnel :: pid()) -> ok.
+%% Schedules an application tunnel for the service handler to process.
+-spec handle_tunnel(Server :: iris_server:server(), Tunnel :: pid()) -> ok.
 
 handle_tunnel(Server, Tunnel) ->
 	ok = gen_server:cast(Server, {handle_tunnel, Tunnel}).
