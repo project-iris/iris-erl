@@ -15,8 +15,8 @@
 -export_type([client/0]).
 
 
-%% client interface to the local Iris node. All outbound messaging passes through one of these.
--type client() :: pid().
+-type client() :: pid(). %% Client interface to the local Iris node. All outbound
+                         %% messaging passes through one of these.
 
 
 %% @doc Connects to the Iris network as a simple client.

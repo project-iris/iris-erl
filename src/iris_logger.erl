@@ -5,7 +5,8 @@
 %% cloud messaging framework, and as such, the same licensing terms apply.
 %% For details please see http://iris.karalabe.com/downloads#License
 
-%% Contains the user configurable contextual logger.
+%% @doc Module responsible for generating contextual log entries.
+%% @end
 
 -module(iris_logger).
 -compile([{parse_transform, lager_transform}]).
@@ -15,11 +16,14 @@
   info/2, info/3, debug/2, debug/3, level/1]).
 -export_type([logger/0]).
 
+
+%% =============================================================================
+%% Macros, types and records
+%% =============================================================================
+
 -define(CONFIG_TABLE, iris_logger).
 
-
-%% Contextual logger wrapper around basho's lager.
--type logger() :: {logger, term(), term()}.
+-type logger() :: {logger, term(), term()}. %% Contextual logger wrapper around basho's lager.
 
 -record(logger, {
   context,  %% Context associated with a logger
@@ -31,37 +35,168 @@
 %% External API functions
 %% =============================================================================
 
-%% Creates a new logger without any associated context.
+%% @doc Creates a new logger without any associated context.
+%% @spec () -> Logger
+%%      Logger = iris_logger:logger()
+%% @end
+-spec new() -> iris_logger:logger().
+
 new() -> #logger{context = [], flattened = ""}.
 
-%% Creates a new logger with the specified associated context.
+%% @doc Creates a new logger with the specified associated context.
+%% @spec (Context) -> Logger
+%%      Context = [{Key, Value}]
+%%        Key   = term()
+%%        Value = term()
+%%      Logger  = iris_logger:logger()
+%% @end
+-spec new(Context :: [{term(), term()}]) -> iris_logger:logger().
+
 new(Context) ->
   #logger{context = Context, flattened = flatten(Context)}.
 
-%% Creates a new logger by extending an existing one's context with additional
-%% attributes specified.
+%% @doc Creates a new logger by extending an existing one's context with
+%%      additional attributes specified.
+%% @spec (Base, Context) -> Logger
+%%      Base    = iris_logger:logger()
+%%      Context = [{Key, Value}]
+%%        Key   = term()
+%%        Value = term()
+%%      Logger  = iris_logger:logger()
+%% @end
+-spec new(Base :: iris_logger:logger(), Context :: [{term(), term()}]) ->
+	iris_logger:logger().
+
 new(#logger{context = Ctx, flattened = Flat}, Context) ->
   #logger{context = Ctx ++ Context, flattened = Flat ++ flatten(Context)}.
 
 
-%% Logger functions for various log levels.
-crit(Logger, Message)        -> log(critical, Logger, Message, []).
-crit(Logger, Message, Attrs) -> log(critical, Logger, Message, Attrs).
+%% @doc Generates a critical log entry.
+%% @spec (Logger, Message) -> ok
+%%      Logger  = iris_logger:logger()
+%%      Message = string()
+%% @end
+-spec crit(Logger :: iris_logger:logger(), Message :: string()) -> ok.
 
-error(Logger, Message)        -> log(error, Logger, Message, []).
-error(Logger, Message, Attrs) -> log(error, Logger, Message, Attrs).
+crit(Logger, Message) -> log(critical, Logger, Message, []).
+
+%% @doc Generates a critical log entry with additional attributes.
+%% @spec (Logger, Message, Attributes) -> ok
+%%      Logger     = iris_logger:logger()
+%%      Message    = string()
+%%      Attributes = [Attribute]
+%%        Attribute = [{Key, Value}]
+%%          Key   = term()
+%%          Value = term()
+%% @end
+-spec crit(Logger :: iris_logger:logger(), Message :: string(),
+	Attributes :: [{term(), term()}]) -> ok.
+
+crit(Logger, Message, Attributes) -> log(critical, Logger, Message, Attributes).
+
+
+%% @doc Generates an error log entry.
+%% @spec (Logger, Message) -> ok
+%%      Logger  = iris_logger:logger()
+%%      Message = string()
+%% @end
+-spec error(Logger :: iris_logger:logger(), Message :: string()) -> ok.
+
+error(Logger, Message) -> log(error, Logger, Message, []).
+
+%% @doc Generates an error log entry with additional attributes.
+%% @spec (Logger, Message, Attributes) -> ok
+%%      Logger     = iris_logger:logger()
+%%      Message    = string()
+%%      Attributes = [Attribute]
+%%        Attribute = [{Key, Value}]
+%%          Key   = term()
+%%          Value = term()
+%% @end
+-spec error(Logger :: iris_logger:logger(), Message :: string(),
+	Attributes :: [{term(), term()}]) -> ok.
+
+error(Logger, Message, Attributes) -> log(error, Logger, Message, Attributes).
+
+
+%% @doc Generates a warning log entry.
+%% @spec (Logger, Message) -> ok
+%%      Logger  = iris_logger:logger()
+%%      Message = string()
+%% @end
+-spec warn(Logger :: iris_logger:logger(), Message :: string()) -> ok.
 
 warn(Logger, Message)        -> log(warning, Logger, Message, []).
-warn(Logger, Message, Attrs) -> log(warning, Logger, Message, Attrs).
+
+%% @doc Generates a warning log entry with additional attributes.
+%% @spec (Logger, Message, Attributes) -> ok
+%%      Logger     = iris_logger:logger()
+%%      Message    = string()
+%%      Attributes = [Attribute]
+%%        Attribute = [{Key, Value}]
+%%          Key   = term()
+%%          Value = term()
+%% @end
+-spec warn(Logger :: iris_logger:logger(), Message :: string(),
+	Attributes :: [{term(), term()}]) -> ok.
+
+warn(Logger, Message, Attributes) -> log(warning, Logger, Message, Attributes).
+
+
+%% @doc Generates an info log entry.
+%% @spec (Logger, Message) -> ok
+%%      Logger  = iris_logger:logger()
+%%      Message = string()
+%% @end
+-spec info(Logger :: iris_logger:logger(), Message :: string()) -> ok.
 
 info(Logger, Message)        -> log(info, Logger, Message, []).
-info(Logger, Message, Attrs) -> log(info, Logger, Message, Attrs).
+
+%% @doc Generates an info log entry with additional attributes.
+%% @spec (Logger, Message, Attributes) -> ok
+%%      Logger     = iris_logger:logger()
+%%      Message    = string()
+%%      Attributes = [Attribute]
+%%        Attribute = [{Key, Value}]
+%%          Key   = term()
+%%          Value = term()
+%% @end
+-spec info(Logger :: iris_logger:logger(), Message :: string(),
+	Attributes :: [{term(), term()}]) -> ok.
+
+info(Logger, Message, Attributes) -> log(info, Logger, Message, Attributes).
+
+
+%% @doc Generates a debug log entry.
+%% @spec (Logger, Message) -> ok
+%%      Logger  = iris_logger:logger()
+%%      Message = string()
+%% @end
+-spec debug(Logger :: iris_logger:logger(), Message :: string()) -> ok.
 
 debug(Logger, Message)        -> log(debug, Logger, Message, []).
-debug(Logger, Message, Attrs) -> log(debug, Logger, Message, Attrs).
+
+%% @doc Generates a debug log entry with additional attributes.
+%% @spec (Logger, Message, Attributes) -> ok
+%%      Logger     = iris_logger:logger()
+%%      Message    = string()
+%%      Attributes = [Attribute]
+%%        Attribute = [{Key, Value}]
+%%          Key   = term()
+%%          Value = term()
+%% @end
+-spec debug(Logger :: iris_logger:logger(), Message :: string(),
+	Attributes :: [{term(), term()}]) -> ok.
+
+debug(Logger, Message, Attributes) -> log(debug, Logger, Message, Attributes).
 
 
-%% Sets the level of the logs to be output.
+%% @doc Sets the level of the logs to be output.
+%% @spec (Level) -> ok
+%%      Level = none | debug | info | warning | error | critical
+%% @end
+-spec level(Level :: none | debug | info | warning | error | critical) -> ok.
+
 level(none)  -> set_level(0);
 level(Level) -> set_level(?LEVEL2NUM(Level)).
 
@@ -71,16 +206,22 @@ level(Level) -> set_level(?LEVEL2NUM(Level)).
 %% =============================================================================
 
 %% Sets the log level configuration to the value specified.
+-spec set_level(Level :: non_neg_integer()) -> ok.
+
 set_level(Level) ->
 	try
 		ets:new(?CONFIG_TABLE, [named_table, public, set, {keypos, 1}, {read_concurrency, true}])
 	catch
 		error:badarg -> ok % Config table already exists
 	end,
-	ets:insert(?CONFIG_TABLE, {level, Level}).
+	ets:insert(?CONFIG_TABLE, {level, Level}),
+	ok.
 
 
 %% Enters a log entry into the lager ledger.
+-spec log(Level :: debug | info | warning | error | critical, Logger :: iris_logger:logger(),
+	Message :: string(), Arrts :: [{term(), term()}]) -> ok.
+
 log(Level, #logger{context = Ctx, flattened = Pref}, Message, Attrs) ->
 	% Fetch any local level filtering
 	Log = try
@@ -100,6 +241,8 @@ log(Level, #logger{context = Ctx, flattened = Pref}, Message, Attrs) ->
 
 
 %% Flattens a property list into a key-value assignments string.
+-spec flatten(Attributes :: [{term(), term()}]) -> iolist().
+
 flatten(Attributes) ->
   lists:foldl(fun({Key, Value}, Attrs) ->
     ValueRaw   = lists:flatten(io_lib:format("~p", [Value])),
@@ -113,8 +256,8 @@ flatten(Attributes) ->
 
 %% Since basho's lager logger doesn't support printing the metadata associated
 %% with log entries, override it and do it manually.
-format(Context, {Format, Args}, Attributes) ->
-  format(Context, lists:flatten(io_lib:format(Format, Args)), Attributes);
+-spec format(Context :: string(), Message :: string(),
+	Attributes :: [{term(), term()}]) -> iolist().
 
 format(Context, Message, Attributes) ->
   io_lib:format("~-40s~s~s", [Message, Context, flatten(Attributes)]).
