@@ -16,6 +16,8 @@
 
 
 %% Fetches the next auto incrementing unique id for the given counter.
+-spec next_id(Name :: atom()) -> pos_integer().
+
 next_id(Name) ->
   % Generate a canonical name for the counter and look it up
   Counter = list_to_atom(lists:flatten(io_lib:format("iris_counter_~p", [Name]))),
@@ -44,6 +46,8 @@ next_id(Name) ->
 
 
 %% Loops around, waiting for auto id requests.
+-spec loop(Id :: pos_integer()) -> ok.
+
 loop(Id) ->
   receive
     {From, next} ->
