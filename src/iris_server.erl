@@ -5,8 +5,8 @@
 %% cloud messaging framework, and as such, the same licensing terms apply.
 %% For details please see http://iris.karalabe.com/downloads#License
 
-%% @doc A behavior module for implementing an Iris server micro service. The
-%%      behavior follows the exact same design principles as the OTP gen_server.
+%% @doc A behavior module for implementing an Iris micro service. The behavior
+%%      follows the exact same design principles as the OTP gen_server.
 %%
 %%      It is assumed that all handler specific parts are located in a callback
 %%      module, which implements and exports a set of pre-defined functions. The

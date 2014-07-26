@@ -5,6 +5,10 @@
 %% cloud messaging framework, and as such, the same licensing terms apply.
 %% For details please see http://iris.karalabe.com/downloads#License
 
+%% @doc Module responsible for communicating through an ordered and throttled
+%%      data stream,
+%% @end
+
 -module(iris_tunnel).
 -export([send/3, recv/2, close/1, logger/1]).
 -export_type([tunnel/0]).
@@ -17,32 +21,60 @@
 	code_change/3]).
 
 
-%% Communication stream between the local application and a remote endpoint.
--type tunnel() :: pid().
+-type tunnel() :: pid(). %% Communication stream between the local application
+                         %% and a remote endpoint.
 
 
 %% =============================================================================
 %% External API functions
 %% =============================================================================
 
-%% Forwards the message to be sent to the tunnel process.
--spec send(Tunnel :: pid(), Message :: binary(), Timeout :: timeout()) ->
+%% @doc Sends a message over the tunnel to the remote pair, blocking until the
+%%      local Iris node receives the message or the operation times out.
+%%
+%%      Infinite blocking is supported with by setting the timeout to infinity.
+%%
+%% @spec (Tunnel, Message, Timeout) -> ok | {error, Reason}
+%%      Tunnel  = iris_tunnel:tunnel()
+%%      Message = binary()
+%%      Timeout = timeout()
+%%      Reason  = timeout | atom()
+%% @end
+-spec send(Tunnel :: iris_tunnel:tunnel(), Message :: binary(), Timeout :: timeout()) ->
 	ok | {error, Reason :: atom()}.
 
 send(Tunnel, Message, Timeout) ->
 	gen_server:call(Tunnel, {schedule_send, Message, Timeout}, infinity).
 
 
-%% Forwards the receive request to the tunnel process.
--spec recv(Tunnel :: pid(), Timeout :: timeout()) ->
+%% @doc Retrieves a message from the tunnel, blocking until one is available or
+%%      the operation times out.
+%%
+%%      Infinite blocking is supported with by setting the timeout to infinity.
+%%
+%% @spec (Tunnel, Timeout) -> {ok, Message} | {error, Reason}
+%%      Tunnel  = iris_tunnel:tunnel()
+%%      Timeout = timeout()
+%%      Message = binary()
+%%      Reason  = timeout | atom()
+%% @end
+-spec recv(Tunnel :: iris_tunnel:tunnel(), Timeout :: timeout()) ->
 	{ok, Message :: binary()} | {error, Reason :: atom()}.
 
 recv(Tunnel, Timeout) ->
 	gen_server:call(Tunnel, {schedule_recv, Timeout}, infinity).
 
 
-%% Forwards the close request to the tunnel.
--spec close(Tunnel :: pid()) ->
+%% @doc Closes the tunnel between the pair. Any blocked read and write operation
+%%      will terminate with a failure.
+%%
+%%      The method blocks until the local relay node acknowledges the tear-down.
+%%
+%% @spec (Tunnel) -> ok | {error, Reason}
+%%      Tunnel = iris_tunnel:tunnel()
+%%      Reason = atom()
+%% @end
+-spec close(Tunnel :: iris_tunnel:tunnel()) ->
 	ok | {error, Reason :: atom()}.
 
 close(Tunnel) ->
@@ -55,6 +87,8 @@ close(Tunnel) ->
 %%      Tunnel = pid()
 %%      Logger = iris_logger:logger()
 %% @end
+-spec logger(Tunnel :: iris_tunnel:tunnel()) -> Logger :: iris_logger:logger().
+
 logger(Tunnel) ->
 	gen_server:call(Tunnel, {logger}, infinity).
 
@@ -80,7 +114,7 @@ start_link(Id, ChunkLimit, Logger) ->
 
 
 %% @private
--spec finalize(Tunnel :: pid(), Result :: {ok, ChunkLimit :: pos_integer()} |
+-spec finalize(Tunnel :: iris_tunnel:tunnel(), Result :: {ok, ChunkLimit :: pos_integer()} |
 	{error, Reason :: term()}) -> ok.
 
 finalize(Tunnel, Result) ->
@@ -93,7 +127,7 @@ finalize(Tunnel, Result) ->
 
 %% @private
 %% Schedules an application allowance for the service handler to process.
--spec handle_allowance(Tunnel :: pid(), Space :: pos_integer()) -> ok.
+-spec handle_allowance(Tunnel :: iris_tunnel:tunnel(), Space :: pos_integer()) -> ok.
 
 handle_allowance(Tunnel, Space) ->
   ok = gen_server:cast(Tunnel, {handle_allowance, Space}).
@@ -101,7 +135,7 @@ handle_allowance(Tunnel, Space) ->
 
 %% @private
 %% Schedules an application transfer for the service handler to process.
--spec handle_transfer(Tunnel :: pid(), SizeOrCont :: non_neg_integer(),
+-spec handle_transfer(Tunnel :: iris_tunnel:tunnel(), SizeOrCont :: non_neg_integer(),
 	Payload :: binary()) -> ok.
 
 handle_transfer(Tunnel, SizeOrCont, Payload) ->
@@ -110,7 +144,7 @@ handle_transfer(Tunnel, SizeOrCont, Payload) ->
 
 %% @private
 %% Schedules an application transfer for the service handler to process.
--spec handle_close(Tunnel :: pid(), Reason :: string()) -> ok.
+-spec handle_close(Tunnel :: iris_tunnel:tunnel(), Reason :: string()) -> ok.
 
 handle_close(Tunnel, Reason) ->
   ok = gen_server:cast(Tunnel, {handle_close, Reason}).
