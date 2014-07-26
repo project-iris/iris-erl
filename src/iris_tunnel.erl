@@ -6,7 +6,7 @@
 %% For details please see http://iris.karalabe.com/downloads#License
 
 %% @doc Module responsible for communicating through an ordered and throttled
-%%      data stream,
+%%      data stream.
 %% @end
 
 -module(iris_tunnel).

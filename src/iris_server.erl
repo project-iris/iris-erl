@@ -17,7 +17,7 @@
 %%      iris_server module          callback module
 %%      ----------------------      --------------------
 %%      iris_server:start
-%%      iris_server:start_link ---> Module:init/1
+%%      iris_server:start_link ---> Module:init/2
 %%      iris_server:stop       ---> Module:terminate/2
 %%      ---                    ---> Module:handle_drop/2
 %%
@@ -29,9 +29,7 @@
 %%      '''
 %%
 %%      If a callback function fails or returns a bad value, the iris_server
-%%      will terminate. Unless otherwise stated, all functions in this module
-%%      fail if the specified iris_server does not exist or if bad arguments are
-%%      given.
+%%      will terminate.
 %%
 %%      A slight difference to the gen_server behavior is that the event trigger
 %%      methods have not been duplicated in the iris_server module too, rather
@@ -171,8 +169,8 @@
 %%      === terminate/2 ===
 %%      ```
 %%      terminate(Reason, State)
-%%          Reason    = term()
-%%          State     = term()
+%%          Reason = term()
+%%          State  = term()
 %%      '''
 %%      This method is called when an iris_server is about to terminate. It is
 %%      the opposite of `Module:init/1' and should do any necessary cleaning up.
@@ -205,7 +203,7 @@
 %% Iris server behavior definitions
 %% =============================================================================
 
--callback init(Conn :: pid(), Args :: term()) ->
+-callback init(Client :: iris_client:client(), Args :: term()) ->
 	{ok, State :: term()} | {stop, Reason :: term()}.
 
 -callback handle_broadcast(Message :: binary(), State :: term()) ->

@@ -6,6 +6,11 @@
 %% For details please see http://iris.karalabe.com/downloads#License
 
 %% @doc Module responsible for generating contextual log entries.
+%%
+%%      In order to prevent duplicating documentation, for an overview of the
+%%      binding's logger functionality, please see <a target="_blank"
+%%      href="https://github.com/project-iris/iris-erl#logging">Quickstart:
+%%      Logger</a>.
 %% @end
 
 -module(iris_logger).
