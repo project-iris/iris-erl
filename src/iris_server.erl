@@ -513,7 +513,7 @@ handle_info({drop, Reason}, State = #state{conn = Conn, hand_mod = Mod}) ->
 
 %% @private
 %% Delivers an inbound tunnel to the callback and processes the result.
-handle_cast({handle_tunnel, Tunnel}, State = #state{conn = Conn, hand_mod = Mod}) ->
+handle_cast({handle_tunnel, Tunnel}, State = #state{hand_mod = Mod}) ->
 	case Mod:handle_tunnel(Tunnel, State#state.hand_state) of
 		{noreply, NewState}      -> {noreply, State#state{hand_state = NewState}};
 		{stop, Reason, NewState} -> {stop, Reason, State#state{hand_state = NewState}}
