@@ -81,7 +81,7 @@ request(Connection, Cluster, Request, Timeout) ->
 
 
 %% Forwards an async reply to the relay to be sent back to the caller.
--spec reply(Sender :: iris:sender(), {ok, Reply :: binary()} | {error, Reason :: term()}) ->
+-spec reply(From :: {pid(), pos_integer()}, {ok, Reply :: binary()} | {error, Reason :: term()}) ->
 	ok | {error, Reason :: atom()}.
 
 reply({Connection, RequestId}, Response) ->

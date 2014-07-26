@@ -213,7 +213,7 @@
 	{reply, {ok, Reply :: binary()} | {error, Reason :: term()}, NewState :: term()} | {noreply, NewState :: term()} |
 	{stop, Reply :: binary(), Reason :: term(), NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
--callback handle_tunnel(Tunnel :: iris:tunnel(), State :: term()) ->
+-callback handle_tunnel(Tunnel :: iris_tunnel:tunnel(), State :: term()) ->
 	{noreply, NewState :: term()} | {stop, Reason :: term(), NewState :: term()}.
 
 -callback handle_drop(Reason :: term(), State :: term()) ->
