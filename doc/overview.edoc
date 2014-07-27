@@ -190,6 +190,6 @@ Generating random network name... done.
 <h3>
 <a name="user-content-additional-goodies" class="anchor" href="#additional-goodies" aria-hidden="true"><span class="octicon octicon-link"></span></a>Additional goodies</h3>
 
-<p>You can find a teaser presentation, touching on all the key features of the library through a handful of challenges and their solutions. The recommended version is the <a href="http://play.iris.karalabe.com/talks/binds/erlang.slide">playground</a>, containing modifiable and executable code snippets, but a <a href="http://iris.karalabe.com/talks/binds/erlang.slide">read only</a> one is also available.</p>
+<p>You can find a teaser presentation, touching on all the key features of the library through a handful of challenges and their solutions. The recommended version is the <a href="http://play.iris.karalabe.com/talks/binds/erlang.v1.slide">playground</a>, containing modifiable and executable code snippets, but a <a href="http://iris.karalabe.com/talks/binds/erlang.v1.slide">read only</a> one is also available.</p>
 
 @end
