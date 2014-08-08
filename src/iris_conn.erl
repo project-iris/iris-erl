@@ -305,7 +305,7 @@ handle_call({subscribe, Topic, Module, Args, Options}, _From, State = #state{soc
 
 	% Execute the subscription procedure
 	ok        = iris_proto:send_subscribe(Sock, Topic),
-	{ok, Sub} = iris_topic:start_link(self(), Module, Args, MemoryLimit, Logger),
+	{ok, Sub} = iris_topic:start_link(Module, Args, MemoryLimit, Logger),
 	Limiter   = iris_topic:limiter(Sub),
 	true      = ets:insert_new(State#state.subLive, {Topic, Sub, Limiter}),
 	{reply, ok, State#state{subIdx = Idx + 1}};

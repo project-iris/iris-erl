@@ -15,7 +15,7 @@
 %%      ```
 %%      iris_client module           callback module
 %%      --------------               -------------------------
-%%      iris_client:subscribe   ---> Module:init/2
+%%      iris_client:subscribe   ---> Module:init/1
 %%      iris_client:publish     ---> Module:handle_event/2
 %%      iris_client:unsubscribe ---> Module:terminate/2
 %%      '''
@@ -32,10 +32,9 @@
 %%      Since edoc cannot generate documentation for callback methods, they have
 %%      been included here for reference:
 %%
-%%      === init/2 ===
+%%      === init/1 ===
 %%      ```
-%%      init(Client, Args) -> {ok, State} | {stop, Reason}
-%%          Client = iris_client:client()
+%%      init(Args) -> {ok, State} | {stop, Reason}
 %%          Args   = term()
 %%          State  = term()
 %%          Reason = term()
@@ -44,12 +43,9 @@
 %%      this function is called in the new process to initialize the handler state.
 %%
 %%      <ul>
-%%        <li>`Client' is the client or server's connection to the relay (depending
-%%             who teh subscriber is, enabling queries to other remote services.</li>
 %%        <li>`Args' is the `Args' argument provided to `subscribe'.</li>
 %%      </ul><ul>
-%%        <li>If the initialization succeeds, the function should return `{ok,
-%%            State}'.</li>
+%%        <li>If the initialization succeeds, the function should return `{ok, State}'.</li>
 %%        <li>Otherwise, the return value should be `{stop, Reason}'</li>
 %%      </ul>
 %%
@@ -93,7 +89,7 @@
 %% @end
 
 -module(iris_topic).
--export([start_link/5, stop/1, limiter/1]).
+-export([start_link/4, stop/1, limiter/1]).
 -export([handle_event/2]).
 
 -behaviour(gen_server).
@@ -105,7 +101,7 @@
 %% Iris topic subscription behavior definitions
 %% =============================================================================
 
--callback init(Client :: iris_client:client(), Args :: term()) ->
+-callback init(Args :: term()) ->
 	{ok, State :: term()} | {stop, Reason :: term()}.
 
 -callback handle_event(Event :: binary(), State :: term()) ->
@@ -121,11 +117,11 @@
 
 %% @private
 %% Starts and links a topic subscription.
--spec start_link(Conn :: pid(), Module :: atom(), Args :: term(),	Limits :: pos_integer(),
+-spec start_link(Module :: atom(), Args :: term(),	Limits :: pos_integer(),
   Logger :: iris_logger:logger()) -> {ok, Server :: pid()} | {error, Reason :: term()}.
 
-start_link(Conn, Module, Args, Limits, Logger) ->
-	gen_server:start_link(?MODULE, {Conn, Module, Args, Limits, Logger}, []).
+start_link(Module, Args, Limits, Logger) ->
+	gen_server:start_link(?MODULE, {Module, Args, Limits, Logger}, []).
 
 
 %% @private
@@ -170,13 +166,13 @@ handle_event(Limiter, Event) ->
 
 %% @private
 %% Initializes the callback handler and subscribes to the requested topic.
-init({Conn, Module, Args, Limits, Logger}) ->
+init({Module, Args, Limits, Logger}) ->
 	% Spawn the mailbox limiter threads
 	process_flag(trap_exit, true),
   Limiter = iris_mailbox:start_link(self(), Limits, Logger),
 
   % Initialize the callback handler
-	case Module:init(Conn, Args) of
+	case Module:init(Args) of
 		{ok, State} ->
 			{ok, #state{
 				limiter    = Limiter,

@@ -8,11 +8,11 @@
 -module(pubsub_handler).
 
 -behaviour(iris_topic).
--export([init/2, handle_event/2, terminate/2]).
+-export([init/1, handle_event/2, terminate/2]).
 
 
 %% Simply saves the parent tester for reporting events.
-init(_Conn, State = {_Parent, _Topic}) -> {ok, State}.
+init(State = {_Parent, _Topic}) -> {ok, State}.
 
 %% Handles a topic event by reporting it to the tester process.
 handle_event(Event, State = {Parent, Topic}) ->
