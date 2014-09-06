@@ -172,7 +172,7 @@ tunnel_overload_test() ->
   	|| X <- lists:seq(1, 1024*1024)]
   ),
   lists:foreach(fun(_) ->
-		{error, timeout} = iris_tunnel:send(Tunnel, Blob, 1)
+		{error, timeout} = iris_tunnel:send(Tunnel, Blob, 10)
   end, lists:seq(1, 10)),
 
   % Verify that the tunnel is still operational
